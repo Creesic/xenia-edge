@@ -829,6 +829,18 @@ void SpirvShaderTranslator::ProcessTextureFetchInstruction(
     //      result exponent bias.
     // - 5: Dimensionality (3D or 2D stacked - needed only once).
 
+    id_vector_temp_.clear();
+    id_vector_temp_.push_back(const_int_0_);
+    id_vector_temp_.push_back(
+        builder_->makeIntConstant(int((fetch_constant_word_0_index + 1) >> 2)));
+    id_vector_temp_.push_back(
+        builder_->makeIntConstant(int((fetch_constant_word_0_index + 1) & 3)));
+    spv::Id fetch_constant_word_1 =
+        builder_->createLoad(builder_->createAccessChain(
+                                 spv::StorageClassUniform,
+                                 uniform_fetch_constants_, id_vector_temp_),
+                             spv::NoPrecision);
+
     // Load the texture size and whether it's 3D or stacked if needed.
     // 1D: X - width.
     // 2D, cube: X - width, Y - height (cube maps probably can be only square,
