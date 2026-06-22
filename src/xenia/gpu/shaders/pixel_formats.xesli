@@ -581,15 +581,6 @@ uint4_xe XeRG16UNormToRG16Float(uint4_xe packed_texels) {
                   pack_half_2x16_xe(float2_xe(r.w, g.w)));
 }
 
-uint4_xe XeRG16UIntToRG16Float(uint4_xe packed_texels) {
-  float4_xe r = float4_xe(packed_texels & 0xFFFFu);
-  float4_xe g = float4_xe(packed_texels >> 16u);
-  return uint4_xe(pack_half_2x16_xe(float2_xe(r.x, g.x)),
-                  pack_half_2x16_xe(float2_xe(r.y, g.y)),
-                  pack_half_2x16_xe(float2_xe(r.z, g.z)),
-                  pack_half_2x16_xe(float2_xe(r.w, g.w)));
-}
-
 uint4_xe XeRG16SNormToRG16Float(uint4_xe packed_texels) {
   float4_xe r =
       max(float_x4_xe(-1.0f),
