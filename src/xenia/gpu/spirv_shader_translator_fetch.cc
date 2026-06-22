@@ -2391,7 +2391,7 @@ void SpirvShaderTranslator::ProcessTextureFetchInstruction(
         spv::Id fetch_num_format_integer = builder_->createBinOp(
             spv::OpINotEqual, type_bool_,
             builder_->createBinOp(spv::OpBitwiseAnd, type_uint_,
-                                  fetch_constant_word_3_signed,
+                                  fetch_constant_word_3,
                                   builder_->makeUintConstant(UINT32_C(1))),
             const_uint_0_);
         spv::Id fetch_format_from_fc = builder_->createTriOp(
