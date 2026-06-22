@@ -2159,6 +2159,46 @@ void DxbcShaderTranslator::ProcessTextureFetchInstruction(
   }
 
   if (instr.opcode == FetchOpcode::kTextureFetch) {
+    // num_format=1 integer mode: recover raw integer values from UNorm host
+    // samples. 16-bit formats ×65535, 8-bit (incl. DXT) ×255.
+    uint32_t integer_scale_temp = PushSystemTemp();
+    a_.OpUBFE(dxbc::Dest::R(integer_scale_temp, 0b0001),
+              dxbc::Src::LU(1), dxbc::Src::LU(0),
+              RequestTextureFetchConstantWord(tfetch_index, 3));
+    a_.OpIf(true, dxbc::Src::R(integer_scale_temp, dxbc::Src::kXXXX));
+    {
+      a_.OpUBFE(dxbc::Dest::R(integer_scale_temp, 0b0001),
+                dxbc::Src::LU(6), dxbc::Src::LU(0),
+                RequestTextureFetchConstantWord(tfetch_index, 1));
+      a_.OpIEq(dxbc::Dest::R(integer_scale_temp, 0b0010),
+               dxbc::Src::R(integer_scale_temp, dxbc::Src::kXXXX),
+               dxbc::Src::LU(
+                   uint32_t(xenos::TextureFormat::k_16_16_16_16)));
+      a_.OpIEq(dxbc::Dest::R(integer_scale_temp, 0b0100),
+               dxbc::Src::R(integer_scale_temp, dxbc::Src::kXXXX),
+               dxbc::Src::LU(uint32_t(xenos::TextureFormat::k_16_16)));
+      a_.OpOr(dxbc::Dest::R(integer_scale_temp, 0b0010),
+              dxbc::Src::R(integer_scale_temp, dxbc::Src::kYYYY),
+              dxbc::Src::R(integer_scale_temp, dxbc::Src::kZZZZ));
+      a_.OpIEq(dxbc::Dest::R(integer_scale_temp, 0b0100),
+               dxbc::Src::R(integer_scale_temp, dxbc::Src::kXXXX),
+               dxbc::Src::LU(uint32_t(xenos::TextureFormat::k_16)));
+      a_.OpOr(dxbc::Dest::R(integer_scale_temp, 0b0001),
+              dxbc::Src::R(integer_scale_temp, dxbc::Src::kYYYY),
+              dxbc::Src::R(integer_scale_temp, dxbc::Src::kZZZZ));
+      a_.OpMovC(dxbc::Dest::R(integer_scale_temp, 0b0001),
+                dxbc::Src::R(integer_scale_temp, dxbc::Src::kXXXX),
+                dxbc::Src::LF(65535.0f), dxbc::Src::LF(255.0f));
+      a_.OpMul(dxbc::Dest::R(system_temp_result_,
+                              used_result_nonzero_components),
+               dxbc::Src::R(system_temp_result_),
+               dxbc::Src::R(integer_scale_temp, dxbc::Src::kXXXX));
+    }
+    a_.OpEndIf();
+    PopSystemTemp();
+  }
+
+  if (instr.opcode == FetchOpcode::kTextureFetch) {
     // Apply the result exponent bias.
     uint32_t exp_adjust_temp = PushSystemTemp();
     a_.OpIBFE(dxbc::Dest::R(exp_adjust_temp, 0b0001), dxbc::Src::LU(6),

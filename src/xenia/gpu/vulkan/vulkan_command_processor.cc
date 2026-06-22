@@ -6941,6 +6941,32 @@ bool VulkanCommandProcessor::UpdateBindings(const VulkanShader* vertex_shader,
       buffer_info.range = VkDeviceSize(kFetchConstantsSize);
       std::memcpy(mapping, &regs[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0],
                   kFetchConstantsSize);
+      // TEMP_FETCH_DUMP: Log non-zero texture fetch constants to identify
+      // num_format and exp_adjust values for each texture slot.
+      // Remove once root cause is identified.
+      if (kernel_state_ && kernel_state_->title_id() == 0x415608B2) {
+        static uint32_t fetch_dump_count = 0;
+        if (fetch_dump_count < 2048) {
+          const xenos::xe_gpu_texture_fetch_t* fetches =
+              reinterpret_cast<const xenos::xe_gpu_texture_fetch_t*>(
+                  &regs[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0]);
+          for (uint32_t i = 0; i < xenos::kTextureFetchConstantCount; ++i) {
+            const auto& f = fetches[i];
+            if (f.type != xenos::FetchConstantType::kTexture || !f.dword_3) {
+              continue;
+            }
+            ++fetch_dump_count;
+            XELOGI(
+                "FetchDump slot={} dword3=0x{:08X} format={} num_format={} "
+                "exp_adjust={} sign={}/{}/{}/{} base=0x{:08X} size={}x{}",
+                i, f.dword_3, uint32_t(f.format), uint32_t(f.num_format),
+                int32_t(f.exp_adjust), uint32_t(f.sign_x), uint32_t(f.sign_y),
+                uint32_t(f.sign_z), uint32_t(f.sign_w),
+                f.base_address << 12, f.size_2d.width + 1,
+                f.size_2d.height + 1);
+          }
+        }
+      }
       current_constant_buffers_up_to_date_ |=
           UINT32_C(1) << SpirvShaderTranslator::kConstantBufferFetch;
     }
