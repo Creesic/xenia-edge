@@ -1742,6 +1742,25 @@ void VulkanCommandProcessor::IssueSwap(uint32_t frontbuffer_ptr,
             frontbuffer_format ==
                 xenos::TextureFormat::k_2_10_10_10_AS_16_16_16_16;
 
+        // TEMP_GAMMA_DUMP
+        {
+          static uint32_t gamma_log_count = 0;
+          if (gamma_log_count < 4) {
+            ++gamma_log_count;
+            const uint32_t* table = gamma_ramp_256_entry_table();
+            const reg::DC_LUT_PWL_DATA* pwl = gamma_ramp_pwl_rgb();
+            XELOGI(
+                "GammaDump #{} fb_format={} use_pwl={} "
+                "table[0]={:#x} [64]={:#x} [128]={:#x} [192]={:#x} [255]={:#x} "
+                "pwl_r[0].base={} .delta={} pwl_r[63].base={} .delta={} "
+                "pwl_g[0].base={} pwl_b[0].base={}",
+                gamma_log_count, uint32_t(frontbuffer_format),
+                uint32_t(use_pwl_gamma_ramp), table[0], table[64], table[128],
+                table[192], table[255], pwl[0].base, pwl[0].delta,
+                pwl[63].base, pwl[63].delta, pwl[128].base, pwl[256].base);
+          }
+        }
+
         SwapPostEffect swap_post_effect = GetActualSwapPostEffect();
         bool use_fxaa = swap_post_effect == SwapPostEffect::kFxaa ||
                         swap_post_effect == SwapPostEffect::kFxaaExtreme;
