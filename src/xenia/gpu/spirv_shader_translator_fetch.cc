@@ -2369,6 +2369,90 @@ void SpirvShaderTranslator::ProcessTextureFetchInstruction(
           }
         }
 
+        // num_format=1 (integer mode): on real hardware, the texture unit
+        // returns raw integer values as floats. Xenia loads textures as
+        // UNorm/SNorm (normalized to 0..1 / -1..1), so we must multiply back
+        // to recover the raw integer range before exp_adjust is applied.
+        // The scale factor depends on the texture's component bit depth:
+        //   16-bit formats: unsigned 65535, signed 32767
+        //   8-bit formats (incl. BC/DXT decompressed): unsigned 255, signed 127
+        spv::Id fetch_num_format_integer = builder_->createBinOp(
+            spv::OpINotEqual, type_bool_,
+            builder_->createBinOp(spv::OpBitwiseAnd, type_uint_,
+                                  fetch_constant_word_3_signed,
+                                  builder_->makeUintConstant(UINT32_C(1))),
+            const_uint_0_);
+        spv::Id fetch_format_from_fc = builder_->createTriOp(
+            spv::OpBitFieldUExtract, type_uint_, fetch_constant_word_1,
+            builder_->makeUintConstant(0), builder_->makeUintConstant(6));
+        spv::Id fetch_format_is_16 = builder_->createBinOp(
+            spv::OpIEqual, type_bool_, fetch_format_from_fc,
+            builder_->makeUintConstant(
+                uint32_t(xenos::TextureFormat::k_16)));
+        spv::Id fetch_format_is_16_16 = builder_->createBinOp(
+            spv::OpIEqual, type_bool_, fetch_format_from_fc,
+            builder_->makeUintConstant(
+                uint32_t(xenos::TextureFormat::k_16_16)));
+        spv::Id fetch_format_is_16_16_16_16 = builder_->createBinOp(
+            spv::OpIEqual, type_bool_, fetch_format_from_fc,
+            builder_->makeUintConstant(
+                uint32_t(xenos::TextureFormat::k_16_16_16_16)));
+        spv::Id fetch_format_is_16bit = builder_->createBinOp(
+            spv::OpLogicalOr, type_bool_, fetch_format_is_16,
+            builder_->createBinOp(spv::OpLogicalOr, type_bool_,
+                                  fetch_format_is_16_16,
+                                  fetch_format_is_16_16_16_16));
+        {
+          uint32_t result_remaining_components = used_result_nonzero_components;
+          uint32_t result_component_index;
+          while (xe::bit_scan_forward(result_remaining_components,
+                                      &result_component_index)) {
+            result_remaining_components &=
+                ~(UINT32_C(1) << result_component_index);
+            spv::Id swizzle_component = builder_->createTriOp(
+                spv::OpBitFieldUExtract, type_uint_, fetch_constant_word_3_signed,
+                builder_->makeUintConstant(1 + 3 * result_component_index),
+                builder_->makeUintConstant(3));
+            spv::Id swizzle_component_is_texture = builder_->createBinOp(
+                spv::OpIEqual, type_bool_,
+                builder_->createBinOp(spv::OpBitwiseAnd, type_uint_,
+                                      swizzle_component,
+                                      builder_->makeUintConstant(UINT32_C(4))),
+                const_uint_0_);
+            spv::Id result_component_is_signed = builder_->createBinOp(
+                spv::OpIEqual, type_bool_,
+                swizzled_signs[result_component_index],
+                const_uint_sign_signed);
+            spv::Id should_scale_component = builder_->createBinOp(
+                spv::OpLogicalAnd, type_bool_, fetch_num_format_integer,
+                swizzle_component_is_texture);
+            spv::Id integer_scale = builder_->createTriOp(
+                spv::OpSelect, type_float_,
+                builder_->createBinOp(spv::OpLogicalAnd, type_bool_,
+                                      result_component_is_signed,
+                                      fetch_format_is_16bit),
+                builder_->makeFloatConstant(32767.0f),
+                builder_->createTriOp(
+                    spv::OpSelect, type_float_,
+                    builder_->createBinOp(spv::OpLogicalAnd, type_bool_,
+                          builder_->createUnaryOp(spv::OpLogicalNot, type_bool_,
+                                                  result_component_is_signed),
+                          fetch_format_is_16bit),
+                    builder_->makeFloatConstant(65535.0f),
+                    builder_->createTriOp(
+                        spv::OpSelect, type_float_,
+                        result_component_is_signed,
+                        builder_->makeFloatConstant(127.0f),
+                        builder_->makeFloatConstant(255.0f))));
+            spv::Id scaled_component = builder_->createNoContractionBinOp(
+                spv::OpFMul, type_float_, result[result_component_index],
+                integer_scale);
+            result[result_component_index] = builder_->createTriOp(
+                spv::OpSelect, type_float_, should_scale_component,
+                scaled_component, result[result_component_index]);
+          }
+        }
+
         // Apply the exponent bias from the bits 13:18 of the fetch constant
         // word 3.
         spv::Id result_exponent_bias = builder_->createBinBuiltinCall(
