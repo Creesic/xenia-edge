@@ -612,6 +612,11 @@ class RenderTargetCache {
   // should be skipped because this guest destination was already exported.
   bool CheckResolveCopyDestRepeat(const draw_util::ResolveInfo& resolve_info);
 
+  // Spider-Man scene export runs Fast resolves (gamma RT @ non-zero EDRAM tile)
+  // then a Full resolve from an empty RT @ tile 0. RB_COLOR_INFO for the
+  // populated RT is gone by the Full IssueCopy — reuse the last cached source.
+  void PatchSceneExportResolveInfo(draw_util::ResolveInfo& resolve_info);
+
   // To be called by the implementation when interlocked writes to all of the
   // EDRAM memory are committed with a memory barrier.
   void PixelShaderInterlockFullEdramBarrierPlaced();

@@ -1306,6 +1306,7 @@ bool D3D12RenderTargetCache::Resolve(const Memory& memory,
           fixed_16_truncated_to_minus_1_to_1, resolve_info)) {
     return false;
   }
+  PatchSceneExportResolveInfo(resolve_info);
 
   // Nothing to copy/clear.
   if (!resolve_info.coordinate_info.width_div_8 || !resolve_info.height_div_8) {

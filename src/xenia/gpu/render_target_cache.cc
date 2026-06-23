@@ -567,6 +567,13 @@ void RenderTargetCache::ClearCache() {
 void RenderTargetCache::BeginFrame() {
   ResetAccumulatedRenderTargets();
   resolve_copy_dests_this_frame_.clear();
+  draw_util::ResetSceneExportResolvePatchState();
+}
+
+void RenderTargetCache::PatchSceneExportResolveInfo(
+    draw_util::ResolveInfo& resolve_info) {
+  // Patched in draw_util::GetResolveInfo so constants are fixed before
+  // GetCopyShader runs regardless of backend call order.
 }
 
 void RenderTargetCache::EndFrame() {

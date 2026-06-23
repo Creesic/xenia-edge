@@ -4624,6 +4624,7 @@ bool MetalRenderTargetCache::Resolve(Memory& memory, uint32_t& written_address,
     XELOGE("MetalRenderTargetCache::Resolve: GetResolveInfo failed");
     return false;
   }
+  PatchSceneExportResolveInfo(resolve_info);
 
   // Nothing to do.
   if (!resolve_info.coordinate_info.width_div_8 || !resolve_info.height_div_8) {

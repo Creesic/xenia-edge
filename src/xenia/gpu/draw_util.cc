@@ -1010,6 +1010,58 @@ constexpr ResolveCopyShaderInfo
         {"Resolve Copy Full 64bpp", 5, 3},
         {"Resolve Copy Full 128bpp", 4, 3},
 };
+
+namespace {
+
+struct SceneExportResolvePatchState {
+  ResolveEdramInfo color_edram_info;
+  uint32_t color_original_base = 0;
+  bool valid = false;
+};
+
+SceneExportResolvePatchState scene_export_resolve_patch;
+
+void PatchSceneExportResolveInfoInPlace(ResolveInfo& resolve_info) {
+  if (resolve_info.IsCopyingDepth()) {
+    return;
+  }
+  if (resolve_info.color_edram_info.base_tiles) {
+    scene_export_resolve_patch.color_edram_info =
+        resolve_info.color_edram_info;
+    scene_export_resolve_patch.color_original_base =
+        resolve_info.color_original_base;
+    scene_export_resolve_patch.valid = true;
+    return;
+  }
+  if (!scene_export_resolve_patch.valid ||
+      !scene_export_resolve_patch.color_edram_info.base_tiles) {
+    return;
+  }
+  const xenos::TextureFormat dest_texture_format =
+      xenos::TextureFormat(resolve_info.copy_dest_info.copy_dest_format);
+  const FormatInfo& dest_format_info = *FormatInfo::Get(dest_texture_format);
+  if (dest_format_info.bits_per_pixel != 64 ||
+      IsFloatTextureFormat(dest_texture_format)) {
+    return;
+  }
+  XELOGI(
+      "Resolve: patching scene export EDRAM source tiles {} -> {} for guest "
+      "0x{:08X}+0x{:X}",
+      resolve_info.color_edram_info.base_tiles,
+      scene_export_resolve_patch.color_edram_info.base_tiles,
+      resolve_info.copy_dest_extent_start,
+      resolve_info.copy_dest_extent_length);
+  resolve_info.color_edram_info = scene_export_resolve_patch.color_edram_info;
+  resolve_info.color_original_base =
+      scene_export_resolve_patch.color_original_base;
+}
+
+}  // namespace
+
+void ResetSceneExportResolvePatchState() {
+  scene_export_resolve_patch = SceneExportResolvePatchState();
+}
+
 XE_MSVC_OPTIMIZE_SMALL()
 bool GetResolveInfo(const RegisterFile& regs, const Memory& memory,
                     TraceWriter& trace_writer, uint32_t draw_resolution_scale_x,
@@ -1232,8 +1284,7 @@ bool GetResolveInfo(const RegisterFile& regs, const Memory& memory,
   info_out.copy_dest_coordinate_info.height_aligned_div_32 =
       copy_dest_height_aligned >> 5;
   const FormatInfo& dest_format_info = *FormatInfo::Get(dest_format);
-  if (is_depth || dest_format_info.type == FormatType::kResolvable) {
-    uint32_t bpp_log2 = xe::log2_floor(dest_format_info.bits_per_pixel >> 3);
+  auto compute_copy_dest_tiled_extent = [&](uint32_t bpp_log2) {
     uint32_t dest_base_relative_x_mask =
         (UINT32_C(1) << xenos::GetTextureTiledXBaseGranularityLog2(
              bool(rb_copy_dest_info.copy_dest_array), bpp_log2)) -
@@ -1250,6 +1301,7 @@ bool GetResolveInfo(const RegisterFile& regs, const Memory& memory,
         xenos::kResolveAlignmentPixelsLog2;
     uint32_t dest_base_x = uint32_t(x0) & ~dest_base_relative_x_mask;
     uint32_t dest_base_y = uint32_t(y0) & ~dest_base_relative_y_mask;
+    copy_dest_base_adjusted = rb_copy_dest_base;
     if (rb_copy_dest_info.copy_dest_array) {
       // The base pointer is already adjusted to the Z / 8 (copy_dest_slice is
       // 3-bit).
@@ -1279,19 +1331,41 @@ bool GetResolveInfo(const RegisterFile& regs, const Memory& memory,
           texture_util::GetTiledAddressUpperBound2D(
               uint32_t(x1), uint32_t(y1), copy_dest_pitch_aligned, bpp_log2);
     }
+    info_out.copy_dest_base = copy_dest_base_adjusted;
+    info_out.copy_dest_extent_start = copy_dest_extent_start;
+    info_out.copy_dest_extent_length =
+        copy_dest_extent_end - copy_dest_extent_start;
+  };
+  if (is_depth || dest_format_info.type == FormatType::kResolvable) {
+    const uint32_t register_bpp_log2 =
+        xe::log2_floor(dest_format_info.bits_per_pixel >> 3);
+    compute_copy_dest_tiled_extent(register_bpp_log2);
+    if (!is_depth && dest_format == xenos::TextureFormat::k_16_16_FLOAT) {
+      const uint32_t resolve_pixel_count =
+          uint32_t(x1 - x0) * uint32_t(y1 - y0);
+      if (resolve_pixel_count &&
+          info_out.copy_dest_extent_length > resolve_pixel_count * 4 &&
+          info_out.copy_dest_base != info_out.copy_dest_extent_start) {
+        const FormatInfo& storage_format_info =
+            *FormatInfo::Get(xenos::TextureFormat::k_16_16_16_16);
+        compute_copy_dest_tiled_extent(xe::log2_floor(
+            storage_format_info.bits_per_pixel >> 3));
+        info_out.copy_dest_register_vs_storage_bpp_mismatch = true;
+      }
+    }
   } else {
     XELOGE("Tried to resolve to format {}, which is not a ColorFormat",
            FormatInfo::GetName(dest_format));
     copy_dest_extent_start = copy_dest_base_adjusted;
     copy_dest_extent_end = copy_dest_base_adjusted;
+    info_out.copy_dest_base = copy_dest_base_adjusted;
+    info_out.copy_dest_extent_start = copy_dest_extent_start;
+    info_out.copy_dest_extent_length =
+        copy_dest_extent_end - copy_dest_extent_start;
   }
   assert_true(copy_dest_extent_start >= copy_dest_base_adjusted);
   assert_true(copy_dest_extent_end >= copy_dest_base_adjusted);
   assert_true(copy_dest_extent_end >= copy_dest_extent_start);
-  info_out.copy_dest_base = copy_dest_base_adjusted;
-  info_out.copy_dest_extent_start = copy_dest_extent_start;
-  info_out.copy_dest_extent_length =
-      copy_dest_extent_end - copy_dest_extent_start;
 
   // Offset relative to the beginning of the tile to put it in fewer bits.
   uint32_t sample_count_log2_x =
@@ -1418,6 +1492,9 @@ bool GetResolveInfo(const RegisterFile& regs, const Memory& memory,
       FormatInfo::GetName(dest_format), rb_copy_dest_base, copy_dest_extent_start,
       copy_dest_extent_end);
 #endif
+  if (!is_depth) {
+    PatchSceneExportResolveInfoInPlace(info_out);
+  }
   return true;
 }
 XE_MSVC_OPTIMIZE_REVERT()
@@ -1429,12 +1506,59 @@ ResolveCopyShaderIndex ResolveInfo::GetCopyShader(
   bool is_depth = IsCopyingDepth();
   ResolveEdramInfo edram_info = is_depth ? depth_edram_info : color_edram_info;
   bool source_is_64bpp = !is_depth && color_edram_info.format_is_64bpp != 0;
-  if (is_depth || (!copy_dest_info.copy_dest_exp_bias &&
-                   xenos::IsSingleCopySampleSelected(
-                       copy_dest_coordinate_info.copy_sample_select) &&
-                   xenos::IsColorResolveFormatBitwiseEquivalent(
-                       xenos::ColorRenderTargetFormat(color_edram_info.format),
-                       xenos::ColorFormat(copy_dest_info.copy_dest_format)))) {
+  const FormatInfo& dest_format_info =
+      *FormatInfo::Get(xenos::TextureFormat(copy_dest_info.copy_dest_format));
+  uint32_t width =
+      (coordinate_info.width_div_8 << xenos::kResolveAlignmentPixelsLog2) *
+      draw_resolution_scale_x;
+  uint32_t height = (height_div_8 << xenos::kResolveAlignmentPixelsLog2) *
+                    draw_resolution_scale_y;
+  const uint32_t pixel_count = width * height;
+  // Spider-Man scene export (and similar): GetResolveInfo recomputed destination
+  // tiling with 64bpp layout when RB says k_16_16_FLOAT but guest storage is
+  // k_16_16_16_16. Force Full 64bpp UNorm packing for float16 EDRAM sources.
+  const bool needs_tiled_float16_unorm_export =
+      !is_depth && pixel_count &&
+      copy_dest_register_vs_storage_bpp_mismatch &&
+      IsFloatColorRenderTargetFormat(
+          xenos::ColorRenderTargetFormat(color_edram_info.format));
+  bool use_fast_path =
+      is_depth ||
+      (!copy_dest_info.copy_dest_exp_bias &&
+       xenos::IsSingleCopySampleSelected(
+           copy_dest_coordinate_info.copy_sample_select) &&
+       xenos::IsColorResolveFormatBitwiseEquivalent(
+           xenos::ColorRenderTargetFormat(color_edram_info.format),
+           xenos::ColorFormat(copy_dest_info.copy_dest_format)));
+  if (use_fast_path && !is_depth) {
+    // Fast copy shaders assume the guest texture storage width matches the fast
+    // path output (32 or 64 bpp). Using Fast 32bpp for a 64bpp destination
+    // (e.g. float16 EDRAM -> k_16_16_16_16 UNorm scene export) writes at
+    // copy_dest_base_adjusted but leaves the texture base at RB_COPY_DEST_BASE
+    // zero — D3D12 captures show black composites in that case.
+    // Float -> fixed exports always need the Full path for exp_bias / packing.
+    auto color_rt_format =
+        xenos::ColorRenderTargetFormat(color_edram_info.format);
+    auto dest_texture_format =
+        xenos::TextureFormat(copy_dest_info.copy_dest_format);
+    if (needs_tiled_float16_unorm_export) {
+      use_fast_path = false;
+    } else if (IsFloatColorRenderTargetFormat(color_rt_format) &&
+               !IsFloatTextureFormat(dest_texture_format)) {
+      use_fast_path = false;
+    } else if (source_is_64bpp) {
+      if (dest_format_info.bits_per_pixel != 64) {
+        use_fast_path = false;
+      }
+    } else if (dest_format_info.bits_per_pixel != 32) {
+      use_fast_path = false;
+    }
+  }
+  uint32_t full_path_bpp = dest_format_info.bits_per_pixel;
+  if (needs_tiled_float16_unorm_export) {
+    full_path_bpp = 64;
+  }
+  if (use_fast_path) {
     if (edram_info.msaa_samples >= xenos::MsaaSamples::k4X) {
       shader = source_is_64bpp ? ResolveCopyShaderIndex::kFast64bpp4xMSAA
                                : ResolveCopyShaderIndex::kFast32bpp4xMSAA;
@@ -1443,9 +1567,7 @@ ResolveCopyShaderIndex ResolveInfo::GetCopyShader(
                                : ResolveCopyShaderIndex::kFast32bpp1x2xMSAA;
     }
   } else {
-    const FormatInfo& dest_format_info =
-        *FormatInfo::Get(xenos::TextureFormat(copy_dest_info.copy_dest_format));
-    switch (dest_format_info.bits_per_pixel) {
+    switch (full_path_bpp) {
       case 8:
         shader = ResolveCopyShaderIndex::kFull8bpp;
         break;
@@ -1462,22 +1584,22 @@ ResolveCopyShaderIndex ResolveInfo::GetCopyShader(
         shader = ResolveCopyShaderIndex::kFull128bpp;
         break;
       default:
-        assert_unhandled_case(dest_format_info.bits_per_pixel);
+        assert_unhandled_case(full_path_bpp);
     }
   }
 
   constants_out.dest_relative.edram_info = edram_info;
   constants_out.dest_relative.coordinate_info = coordinate_info;
   constants_out.dest_relative.dest_info = copy_dest_info;
-  constants_out.dest_relative.dest_coordinate_info = copy_dest_coordinate_info;
   constants_out.dest_base = copy_dest_base;
+  if (needs_tiled_float16_unorm_export) {
+    constants_out.dest_relative.dest_info.copy_dest_format =
+        xenos::ColorFormat::k_16_16_16_16;
+    constants_out.dest_relative.dest_info.copy_dest_exp_bias = 0;
+  }
+  constants_out.dest_relative.dest_coordinate_info = copy_dest_coordinate_info;
 
   if (shader != ResolveCopyShaderIndex::kUnknown) {
-    uint32_t width =
-        (coordinate_info.width_div_8 << xenos::kResolveAlignmentPixelsLog2) *
-        draw_resolution_scale_x;
-    uint32_t height = (height_div_8 << xenos::kResolveAlignmentPixelsLog2) *
-                      draw_resolution_scale_y;
     const ResolveCopyShaderInfo& shader_info =
         resolve_copy_shader_info[size_t(shader)];
     group_count_x_out = (width + ((1 << shader_info.group_size_x_log2) - 1)) >>

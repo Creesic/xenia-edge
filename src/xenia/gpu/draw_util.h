@@ -678,6 +678,10 @@ struct ResolveInfo {
   // dropped.
   uint32_t copy_dest_extent_start;
   uint32_t copy_dest_extent_length;
+  // RB reports k_16_16_FLOAT (32bpp) but guest storage is k_16_16_16_16
+  // (64bpp). copy_dest_* fields are recomputed with 64bpp tiling in
+  // GetResolveInfo when this is set.
+  bool copy_dest_register_vs_storage_bpp_mismatch = false;
 
   // The clear shaders always write to a uint4 view of EDRAM.
   uint32_t rb_depth_clear;
@@ -766,6 +770,9 @@ bool GetResolveInfo(const RegisterFile& regs, const Memory& memory,
                     bool fixed_rg16_truncated_to_minus_1_to_1,
                     bool fixed_rgba16_truncated_to_minus_1_to_1,
                     ResolveInfo& info_out);
+
+// Clears cached EDRAM source info used by GetResolveInfo scene export patching.
+void ResetSceneExportResolvePatchState();
 
 // Maximum length for debug marker labels.
 static constexpr size_t kDebugMarkerLabelMaxLength = 256;
