@@ -1329,8 +1329,8 @@ bool D3D12RenderTargetCache::Resolve(const Memory& memory,
                                               resolve_info);
       command_processor_.PushDebugMarker("%s", label);
     }
-    if (copy_dest_is_repeat &&
-        cvars::skip_repeat_resolve_to_same_dest) {
+    if (copy_dest_is_repeat && cvars::skip_repeat_resolve_to_same_dest &&
+        !draw_util::ShouldAllowRepeatSceneExportOverwrite(resolve_info)) {
       copied = true;
     } else if (GetPath() == Path::kHostRenderTargets) {
       // Dump the current contents of the render targets owning the affected

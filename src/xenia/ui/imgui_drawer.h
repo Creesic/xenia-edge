@@ -94,6 +94,13 @@ class ImGuiDrawer : public WindowInputListener, public UIDrawer {
   void LoadInputSystem(hid::InputSystem* input_system);
   void SetGuideButtonAction(std::function<void(uint8_t)> func);
 
+  // Optional multiplier applied after resolution / font_size scaling.
+  void SetUiScaleMultiplier(float multiplier);
+  float ui_scale_multiplier() const { return ui_scale_multiplier_; }
+  // When true, resolution-based scaling is skipped (fixed baseline size).
+  void SetResolutionScaleDisabled(bool disabled);
+  bool resolution_scale_disabled() const { return resolution_scale_disabled_; }
+
   // Post a callback to be executed after the current frame completes
   void PostDeferredCallback(std::function<void()> callback);
 
@@ -181,6 +188,8 @@ class ImGuiDrawer : public WindowInputListener, public UIDrawer {
   ImGuiStyle base_style_;
   bool base_style_initialized_ = false;
   float last_combined_scale_ = 0.f;
+  float ui_scale_multiplier_ = 1.f;
+  bool resolution_scale_disabled_ = false;
 };
 
 }  // namespace ui

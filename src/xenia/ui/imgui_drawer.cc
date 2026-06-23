@@ -233,6 +233,14 @@ void ImGuiDrawer::LoadInputSystem(hid::InputSystem* input_system) {
   input_system_ = input_system;
 }
 
+void ImGuiDrawer::SetUiScaleMultiplier(float multiplier) {
+  ui_scale_multiplier_ = std::max(multiplier, 0.25f);
+}
+
+void ImGuiDrawer::SetResolutionScaleDisabled(bool disabled) {
+  resolution_scale_disabled_ = disabled;
+}
+
 void ImGuiDrawer::SetGuideButtonAction(std::function<void(uint8_t)> func) {
   onGuidePressFunction_ = func;
 }
@@ -680,11 +688,15 @@ void ImGuiDrawer::Draw(UIDrawContext& ui_draw_context) {
   constexpr float kBaseWidth = 1280.f;
   constexpr float kBaseHeight = 720.f;
   constexpr float kBaseFontSize = 14.f;
-  float resolution_scale =
-      std::fminf(io.DisplaySize.x / kBaseWidth, io.DisplaySize.y / kBaseHeight);
+  float resolution_scale = 1.f;
+  if (!resolution_scale_disabled_) {
+    resolution_scale = std::fminf(io.DisplaySize.x / kBaseWidth,
+                                  io.DisplaySize.y / kBaseHeight);
+  }
   float font_size_scale =
       std::max(static_cast<float>(cvars::font_size), 8.f) / kBaseFontSize;
-  float combined_scale = resolution_scale * font_size_scale;
+  float combined_scale =
+      resolution_scale * font_size_scale * ui_scale_multiplier_;
 
   // Apply font scaling
   io.FontGlobalScale = combined_scale;

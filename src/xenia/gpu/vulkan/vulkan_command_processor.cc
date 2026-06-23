@@ -6580,6 +6580,7 @@ void VulkanCommandProcessor::UpdateSystemConstantValues(
       system_constants_.edram_rt_keep_mask[i][1] = rt_keep_masks[i][1];
       if (rt_keep_masks[i][0] != UINT32_MAX ||
           rt_keep_masks[i][1] != UINT32_MAX) {
+        draw_util::NotifyFsiColorDrawBase(i, color_info.color_base);
         uint32_t rt_base_dwords_scaled =
             color_info.color_base * edram_tile_dwords_scaled;
         dirty |= system_constants_.edram_rt_base_dwords_scaled[i] !=

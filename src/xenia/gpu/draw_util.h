@@ -774,6 +774,16 @@ bool GetResolveInfo(const RegisterFile& regs, const Memory& memory,
 // Clears cached EDRAM source info used by GetResolveInfo scene export patching.
 void ResetSceneExportResolvePatchState();
 
+// Pixel shader interlock: track the last color RT tile base written per slot.
+void NotifyFsiColorDrawBase(uint32_t rt_index, uint32_t color_base_tiles);
+
+// Clears FSI last-draw base tracking (call at frame start).
+void ResetFsiResolvePatchState();
+
+// When skip_repeat_resolve_to_same_dest is enabled, Full64 HDR scene exports
+// may still run again later in the frame once EDRAM has valid content.
+bool ShouldAllowRepeatSceneExportOverwrite(const ResolveInfo& resolve_info);
+
 // Maximum length for debug marker labels.
 static constexpr size_t kDebugMarkerLabelMaxLength = 256;
 

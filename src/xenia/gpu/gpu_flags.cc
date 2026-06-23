@@ -241,6 +241,122 @@ DEFINE_bool(
     "resolve export blowout.",
     "GPU");
 
+DEFINE_int32(
+    resolve_experiment_edram_format, -1,
+    "Override resolve source ColorRenderTargetFormat (-1 = use RB). See "
+    "xenos::ColorRenderTargetFormat enum values (e.g. 7 = float16 64bpp).",
+    "GPU");
+
+DEFINE_int32(
+    resolve_experiment_edram_64bpp, -1,
+    "Override resolve source EDRAM 64bpp flag: -1 auto, 0 force 32bpp layout, "
+    "1 force 64bpp layout.",
+    "GPU");
+
+DEFINE_int32(
+    resolve_experiment_dest_exp_bias, -999,
+    "Override resolve copy_dest_exp_bias (-999 = use RB/computed). Signed "
+    "6-bit range roughly -32..31.",
+    "GPU");
+
+DEFINE_int32(
+    resolve_experiment_force_path, -1,
+    "Override resolve copy shader path: -1 auto, 0 force Fast, 1 force Full.",
+    "GPU");
+
+DEFINE_int32(
+    resolve_experiment_dest_bpp, -1,
+    "Override Full-path destination bpp: -1 auto, 32 or 64.",
+    "GPU");
+
+DEFINE_int32(
+    resolve_experiment_edram_base_tiles, -1,
+    "Override resolve source EDRAM base tile index (-1 = RB/computed).",
+    "GPU");
+
+DEFINE_int32(
+    resolve_experiment_edram_pitch_tiles, -1,
+    "Override resolve source EDRAM pitch in tiles (-1 = RB/computed).",
+    "GPU");
+
+DEFINE_int32(
+    resolve_experiment_edram_msaa, -1,
+    "Override resolve source MSAA: -1 auto, 0 = 1x, 1 = 2x, 2 = 4x.",
+    "GPU");
+
+DEFINE_int32(
+    resolve_experiment_edram_fill_half_pixel, -1,
+    "Override EDRAM fill_half_pixel_offset: -1 auto, 0 off, 1 on.",
+    "GPU");
+
+DEFINE_int32(
+    resolve_experiment_edram_offset_x_div_8, -1,
+    "Override resolve source EDRAM X offset in 8px units within the base "
+    "tile (-1 = computed).",
+    "GPU");
+
+DEFINE_int32(
+    resolve_experiment_edram_offset_y_div_8, -1,
+    "Override resolve source EDRAM Y offset in 8px units within the base "
+    "tile (-1 = computed).",
+    "GPU");
+
+DEFINE_int32(
+    resolve_experiment_dest_offset_x_div_8, -1,
+    "Override resolve destination texture X offset in 8px units (-1 = "
+    "computed).",
+    "GPU");
+
+DEFINE_int32(
+    resolve_experiment_dest_offset_y_div_8, -1,
+    "Override resolve destination texture Y offset in 8px units (-1 = "
+    "computed).",
+    "GPU");
+
+DEFINE_int32(
+    resolve_experiment_copy_dest_swap, -1,
+    "Override RB_COPY_DEST swap: -1 auto, 0 off, 1 on.",
+    "GPU");
+
+DEFINE_int32(
+    resolve_experiment_dest_format, -1,
+    "Override RB_COPY_DEST format (xenos::ColorFormat, -1 = computed).",
+    "GPU");
+
+DEFINE_int32(
+    resolve_experiment_copy_sample_select, -1,
+    "Override resolve MSAA sample select: -1 auto, 0..6 = "
+    "CopySampleSelect.",
+    "GPU");
+
+DEFINE_int32(
+    resolve_experiment_color_exp_bias, -999,
+    "Override RB_COLOR_INFO color_exp_bias (-999 = RB).",
+    "GPU");
+
+DEFINE_bool(
+    resolve_experiment_force_fast_ignore_guards, false,
+    "When Force Fast is active, skip float/dest-bpp guards that normally "
+    "fall back to Full-path shaders.",
+    "GPU");
+
+DEFINE_bool(
+    resolve_experiment_disable_float16_unorm_full, false,
+    "Disable auto promotion of float16 EDRAM -> UNorm exports to Full64.",
+    "GPU");
+
+DEFINE_bool(
+    resolve_experiment_scene_export_tile_patch, true,
+    "Patch Full64 scene export EDRAM tile base from the last non-zero resolve.",
+    "GPU");
+
+DEFINE_bool(
+    resolve_experiment_allow_repeat_full64_overwrite, true,
+    "Allow later Full64 scene exports to overwrite an earlier export to the "
+    "same guest destination (Spider-Man needs this when the first export runs "
+    "on cleared EDRAM).",
+    "GPU");
+
 DEFINE_bool(gpu_3d_to_2d_texture, true,
             "Handle shaders that sample 3D textures as 2D by creating a 2D "
             "texture from slice 0 of the guest memory.",

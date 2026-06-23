@@ -7,9 +7,10 @@
  ******************************************************************************
  */
 
-#include "xenia/ui/gpu_scene_export_test_presets.h"
+#include "xenia/ui/gpu_resolve_experiment.h"
 #include "xenia/ui/imgui_debug_dialog.h"
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
@@ -46,6 +47,28 @@ DECLARE_bool(reload_textures_after_resolve);
 DECLARE_bool(resolve_clear_exp_bias_on_zero);
 DECLARE_bool(gamma_render_target_as_unorm16);
 DECLARE_bool(resolve_resolution_scale_fill_half_pixel_offset);
+DECLARE_bool(skip_repeat_resolve_to_same_dest);
+DECLARE_int32(resolve_experiment_edram_format);
+DECLARE_int32(resolve_experiment_edram_64bpp);
+DECLARE_int32(resolve_experiment_dest_exp_bias);
+DECLARE_int32(resolve_experiment_force_path);
+DECLARE_int32(resolve_experiment_dest_bpp);
+DECLARE_int32(resolve_experiment_edram_base_tiles);
+DECLARE_int32(resolve_experiment_edram_pitch_tiles);
+DECLARE_int32(resolve_experiment_edram_msaa);
+DECLARE_int32(resolve_experiment_edram_fill_half_pixel);
+DECLARE_int32(resolve_experiment_edram_offset_x_div_8);
+DECLARE_int32(resolve_experiment_edram_offset_y_div_8);
+DECLARE_int32(resolve_experiment_dest_offset_x_div_8);
+DECLARE_int32(resolve_experiment_dest_offset_y_div_8);
+DECLARE_int32(resolve_experiment_copy_dest_swap);
+DECLARE_int32(resolve_experiment_dest_format);
+DECLARE_int32(resolve_experiment_copy_sample_select);
+DECLARE_int32(resolve_experiment_color_exp_bias);
+DECLARE_bool(resolve_experiment_force_fast_ignore_guards);
+DECLARE_bool(resolve_experiment_disable_float16_unorm_full);
+DECLARE_bool(resolve_experiment_scene_export_tile_patch);
+DECLARE_bool(resolve_experiment_allow_repeat_full64_overwrite);
 DECLARE_bool(use_fuzzy_alpha_epsilon);
 DECLARE_bool(precise_interpolation);
 DECLARE_bool(dxbc_switch);
@@ -76,6 +99,7 @@ namespace ui {
 namespace {
 
 std::string g_debug_settings_filter;
+float g_debug_settings_ui_scale = 1.5f;
 
 constexpr float kFilterWidth = 250.0f;
 constexpr float kTextInputWidth = 80.0f;
@@ -229,9 +253,19 @@ bool BeginSection(const char* title, bool default_open, bool filter_active) {
 
 ImGuiDebugDialog::ImGuiDebugDialog(ImGuiDrawer* drawer,
                                    app::EmulatorWindow* emulator_window,
-                                   hid::InputSystem* input_system)
-    : ImGuiGamepadDialog(drawer, input_system),
-      emulator_window_(emulator_window) {
+                                   hid::InputSystem* input_system,
+                                   bool external_window)
+    : ImGuiGamepadDialog(drawer, input_system, !external_window),
+      emulator_window_(emulator_window),
+      external_window_(external_window),
+      ui_scale_(g_debug_settings_ui_scale) {
+  if (external_window_) {
+    if (ui_scale_ < 0.75f) {
+      ui_scale_ = 1.5f;
+    }
+    imgui_drawer()->SetResolutionScaleDisabled(true);
+    imgui_drawer()->SetUiScaleMultiplier(ui_scale_);
+  }
   LoadCurrentSettings();
   std::snprintf(filter_buffer_, sizeof(filter_buffer_), "%s",
                 g_debug_settings_filter.c_str());
@@ -308,6 +342,56 @@ void ImGuiDebugDialog::LoadCurrentSettings() {
   gamma_render_target_as_unorm16_ = cvars::gamma_render_target_as_unorm16;
   resolve_resolution_scale_fill_half_pixel_offset_ =
       cvars::resolve_resolution_scale_fill_half_pixel_offset;
+  skip_repeat_resolve_to_same_dest_ = cvars::skip_repeat_resolve_to_same_dest;
+  resolve_experiment_edram_format_ = cvars::resolve_experiment_edram_format;
+  resolve_experiment_edram_64bpp_ = cvars::resolve_experiment_edram_64bpp;
+  resolve_experiment_dest_exp_bias_ = cvars::resolve_experiment_dest_exp_bias;
+  resolve_experiment_dest_exp_bias_override_ =
+      resolve_experiment_dest_exp_bias_ > kGpuResolveExperimentDestExpBiasAuto;
+  resolve_experiment_force_path_ = cvars::resolve_experiment_force_path;
+  resolve_experiment_dest_bpp_ = cvars::resolve_experiment_dest_bpp;
+  resolve_experiment_edram_base_tiles_ =
+      cvars::resolve_experiment_edram_base_tiles;
+  resolve_experiment_edram_base_tiles_override_ =
+      resolve_experiment_edram_base_tiles_ > kGpuResolveExperimentAuto;
+  resolve_experiment_edram_pitch_tiles_ =
+      cvars::resolve_experiment_edram_pitch_tiles;
+  resolve_experiment_edram_pitch_tiles_override_ =
+      resolve_experiment_edram_pitch_tiles_ > kGpuResolveExperimentAuto;
+  resolve_experiment_edram_msaa_ = cvars::resolve_experiment_edram_msaa;
+  resolve_experiment_edram_fill_half_pixel_ =
+      cvars::resolve_experiment_edram_fill_half_pixel;
+  resolve_experiment_edram_offset_x_div_8_ =
+      cvars::resolve_experiment_edram_offset_x_div_8;
+  resolve_experiment_edram_offset_x_override_ =
+      resolve_experiment_edram_offset_x_div_8_ > kGpuResolveExperimentAuto;
+  resolve_experiment_edram_offset_y_div_8_ =
+      cvars::resolve_experiment_edram_offset_y_div_8;
+  resolve_experiment_edram_offset_y_override_ =
+      resolve_experiment_edram_offset_y_div_8_ > kGpuResolveExperimentAuto;
+  resolve_experiment_dest_offset_x_div_8_ =
+      cvars::resolve_experiment_dest_offset_x_div_8;
+  resolve_experiment_dest_offset_x_override_ =
+      resolve_experiment_dest_offset_x_div_8_ > kGpuResolveExperimentAuto;
+  resolve_experiment_dest_offset_y_div_8_ =
+      cvars::resolve_experiment_dest_offset_y_div_8;
+  resolve_experiment_dest_offset_y_override_ =
+      resolve_experiment_dest_offset_y_div_8_ > kGpuResolveExperimentAuto;
+  resolve_experiment_copy_dest_swap_ = cvars::resolve_experiment_copy_dest_swap;
+  resolve_experiment_dest_format_ = cvars::resolve_experiment_dest_format;
+  resolve_experiment_copy_sample_select_ =
+      cvars::resolve_experiment_copy_sample_select;
+  resolve_experiment_color_exp_bias_ = cvars::resolve_experiment_color_exp_bias;
+  resolve_experiment_color_exp_bias_override_ =
+      resolve_experiment_color_exp_bias_ > kGpuResolveExperimentColorExpBiasAuto;
+  resolve_experiment_force_fast_ignore_guards_ =
+      cvars::resolve_experiment_force_fast_ignore_guards;
+  resolve_experiment_disable_float16_unorm_full_ =
+      cvars::resolve_experiment_disable_float16_unorm_full;
+  resolve_experiment_scene_export_tile_patch_ =
+      cvars::resolve_experiment_scene_export_tile_patch;
+  resolve_experiment_allow_repeat_full64_overwrite_ =
+      cvars::resolve_experiment_allow_repeat_full64_overwrite;
 
   use_fuzzy_alpha_epsilon_ = cvars::use_fuzzy_alpha_epsilon;
   precise_interpolation_ = cvars::precise_interpolation;
@@ -565,72 +649,492 @@ void ImGuiDebugDialog::ApplyScribbleHeapValue() {
   SyncTextBuffers();
 }
 
-void ImGuiDebugDialog::ApplyGpuSceneExportTestPresetAt(size_t index) {
-  Emulator* emulator =
-      emulator_window_ != nullptr ? emulator_window_->emulator() : nullptr;
-  GpuSceneExportTestApplyResult result =
-      ApplyGpuSceneExportTestPreset(index, emulator);
-  if (!result.success) {
-    ShowNotification("GPU scene test", "Failed to apply preset");
-    return;
-  }
-  gpu_scene_export_test_index_ = index;
-  LoadCurrentSettings();
-  ShowNotification(result.title, result.detail);
-}
-
-void ImGuiDebugDialog::StepGpuSceneExportTestPreset(int delta) {
-  const size_t count = GetGpuSceneExportTestPresetCount();
-  if (!count) {
-    return;
-  }
-  int next = static_cast<int>(gpu_scene_export_test_index_) + delta;
-  while (next < 0) {
-    next += static_cast<int>(count);
-  }
-  next %= static_cast<int>(count);
-  ApplyGpuSceneExportTestPresetAt(static_cast<size_t>(next));
-}
-
-void ImGuiDebugDialog::DrawGpuSceneExportTestPresets() {
-  const size_t count = GetGpuSceneExportTestPresetCount();
-  if (!count) {
-    return;
-  }
-  if (gpu_scene_export_test_index_ >= count) {
-    gpu_scene_export_test_index_ = 0;
-  }
-
-  const GpuSceneExportTestPreset& preset =
-      GetGpuSceneExportTestPreset(gpu_scene_export_test_index_);
-
+void ImGuiDebugDialog::DrawGpuResolveExperimentPanel() {
   ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.063f, 0.486f, 0.063f, 1.0f));
-  ImGui::TextUnformatted("GPU Scene Export Tests");
+  ImGui::TextUnformatted("GPU Resolve Experiments");
   ImGui::PopStyleColor();
-
-  ImGui::Text("Test %zu / %zu", gpu_scene_export_test_index_ + 1, count);
-  ImGui::TextWrapped("%s", preset.name);
+  ImGui::TextWrapped(
+      "Tweak resolve copy path, EDRAM layout, destination format/bias, and "
+      "scene-export behavior live. Force Fast often looks correct when Auto "
+      "picks Full-path exp_bias packing.");
   ImGui::Spacing();
-  ImGui::TextWrapped("%s", preset.summary);
-  ImGui::Spacing();
 
-  const float button_width =
-      (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) *
-      0.5f;
-  if (ImGui::Button("Previous Test", ImVec2(button_width, 0))) {
-    StepGpuSceneExportTestPreset(-1);
+  const float third_button =
+      (ImGui::GetContentRegionAvail().x -
+       ImGui::GetStyle().ItemSpacing.x * 2.0f) /
+      3.0f;
+  if (ImGui::Button("Baseline", ImVec2(third_button, 0))) {
+    Emulator* emulator =
+        emulator_window_ != nullptr ? emulator_window_->emulator() : nullptr;
+    ApplyGpuResolveExperimentBaseline(emulator);
+    LoadCurrentSettings();
+    ShowNotification("Resolve experiments", "Applied baseline combo");
   }
   ImGui::SameLine();
-  if (ImGui::Button("Next Test", ImVec2(button_width, 0))) {
-    StepGpuSceneExportTestPreset(1);
+  if (ImGui::Button("Force Fast", ImVec2(third_button, 0))) {
+    Emulator* emulator =
+        emulator_window_ != nullptr ? emulator_window_->emulator() : nullptr;
+    ApplyGpuResolveExperimentForceFast(emulator);
+    LoadCurrentSettings();
+    ShowNotification("Resolve experiments", "Force Fast copy shaders");
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Legacy exp_bias", ImVec2(third_button, 0))) {
+    Emulator* emulator =
+        emulator_window_ != nullptr ? emulator_window_->emulator() : nullptr;
+    ApplyGpuResolveExperimentLegacyExpBias(emulator);
+    LoadCurrentSettings();
+    ShowNotification("Resolve experiments", "Legacy exp_bias (no clear)");
+  }
+  if (ImGui::Button("Reset experiment overrides", ImVec2(-1.0f, 0))) {
+    Emulator* emulator =
+        emulator_window_ != nullptr ? emulator_window_->emulator() : nullptr;
+    ResetGpuResolveExperimentOverrides(emulator);
+    LoadCurrentSettings();
+    ShowNotification("Resolve experiments", "Overrides reset to Auto");
   }
 
-  if (ImGui::Button("Apply This Test Again", ImVec2(-1.0f, 0))) {
-    ApplyGpuSceneExportTestPresetAt(gpu_scene_export_test_index_);
+  if (ImGui::CollapsingHeader("Resolve path", ImGuiTreeNodeFlags_DefaultOpen)) {
+    int edram_format_combo = FindGpuResolveExperimentEdramFormatComboIndex(
+        resolve_experiment_edram_format_);
+    if (ImGui::BeginTable("##resolve_exp_edram", 2,
+                          ImGuiTableFlags_SizingStretchProp)) {
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::TextUnformatted("EDRAM format");
+      ImGui::TableSetColumnIndex(1);
+      if (ImGui::BeginCombo("##resolve_experiment_edram_format",
+                            GetGpuResolveExperimentEdramFormatOption(
+                                edram_format_combo)
+                                .label)) {
+        for (size_t i = 0; i < GetGpuResolveExperimentEdramFormatOptionCount();
+             ++i) {
+          const auto& option = GetGpuResolveExperimentEdramFormatOption(i);
+          if (ImGui::Selectable(option.label, edram_format_combo == int(i))) {
+            resolve_experiment_edram_format_ = option.value;
+            ApplyInt32Setting("GPU", "resolve_experiment_edram_format",
+                              option.value, true);
+          }
+          if (edram_format_combo == int(i)) {
+            ImGui::SetItemDefaultFocus();
+          }
+        }
+        ImGui::EndCombo();
+      }
+
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::TextUnformatted("EDRAM 32/64bpp");
+      ImGui::TableSetColumnIndex(1);
+      int edram_64_combo = FindGpuResolveExperimentEdram64bppComboIndex(
+          resolve_experiment_edram_64bpp_);
+      if (ImGui::BeginCombo(
+              "##resolve_experiment_edram_64bpp",
+              GetGpuResolveExperimentEdram64bppOption(edram_64_combo).label)) {
+        for (size_t i = 0; i < GetGpuResolveExperimentEdram64bppOptionCount();
+             ++i) {
+          const auto& option = GetGpuResolveExperimentEdram64bppOption(i);
+          if (ImGui::Selectable(option.label, edram_64_combo == int(i))) {
+            resolve_experiment_edram_64bpp_ = option.value;
+            ApplyInt32Setting("GPU", "resolve_experiment_edram_64bpp",
+                              option.value, true);
+          }
+        }
+        ImGui::EndCombo();
+      }
+
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::TextUnformatted("Copy shader path");
+      ImGui::TableSetColumnIndex(1);
+      int force_path_combo = FindGpuResolveExperimentForcePathComboIndex(
+          resolve_experiment_force_path_);
+      if (ImGui::BeginCombo(
+              "##resolve_experiment_force_path",
+              GetGpuResolveExperimentForcePathOption(force_path_combo).label)) {
+        for (size_t i = 0; i < GetGpuResolveExperimentForcePathOptionCount();
+             ++i) {
+          const auto& option = GetGpuResolveExperimentForcePathOption(i);
+          if (ImGui::Selectable(option.label, force_path_combo == int(i))) {
+            resolve_experiment_force_path_ = option.value;
+            ApplyInt32Setting("GPU", "resolve_experiment_force_path",
+                              option.value, true);
+          }
+        }
+        ImGui::EndCombo();
+      }
+
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::TextUnformatted("Full dest bpp");
+      ImGui::TableSetColumnIndex(1);
+      int dest_bpp_combo = FindGpuResolveExperimentDestBppComboIndex(
+          resolve_experiment_dest_bpp_);
+      if (ImGui::BeginCombo(
+              "##resolve_experiment_dest_bpp",
+              GetGpuResolveExperimentDestBppOption(dest_bpp_combo).label)) {
+        for (size_t i = 0; i < GetGpuResolveExperimentDestBppOptionCount();
+             ++i) {
+          const auto& option = GetGpuResolveExperimentDestBppOption(i);
+          if (ImGui::Selectable(option.label, dest_bpp_combo == int(i))) {
+            resolve_experiment_dest_bpp_ = option.value;
+            ApplyInt32Setting("GPU", "resolve_experiment_dest_bpp", option.value,
+                              true);
+          }
+        }
+        ImGui::EndCombo();
+      }
+      ImGui::EndTable();
+    }
+    if (ImGui::Checkbox("Force Fast ignore guards",
+                        &resolve_experiment_force_fast_ignore_guards_)) {
+      ApplyBoolSetting("GPU", "resolve_experiment_force_fast_ignore_guards",
+                       resolve_experiment_force_fast_ignore_guards_, true);
+    }
+    if (ImGui::Checkbox("Disable float16->UNorm Full64",
+                        &resolve_experiment_disable_float16_unorm_full_)) {
+      ApplyBoolSetting("GPU", "resolve_experiment_disable_float16_unorm_full",
+                       resolve_experiment_disable_float16_unorm_full_, true);
+    }
   }
 
-  ImGui::TextDisabled(
-      "[ and ] or PageUp/PageDown to step while this window is open");
+  if (ImGui::CollapsingHeader("EDRAM layout (xe_resolve_edram_info)",
+                              ImGuiTreeNodeFlags_DefaultOpen)) {
+    ImGui::TextDisabled(
+        "Packed push constant fields: pitch, msaa, base, format, 64bpp, "
+        "fill, plus sub-tile offsets in coordinate_info.");
+    if (ImGui::BeginTable("##resolve_exp_edram_layout", 2,
+                          ImGuiTableFlags_SizingStretchProp)) {
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::TextUnformatted("MSAA");
+      ImGui::TableSetColumnIndex(1);
+      int msaa_combo = FindGpuResolveExperimentEdramMsaaComboIndex(
+          resolve_experiment_edram_msaa_);
+      if (ImGui::BeginCombo(
+              "##resolve_experiment_edram_msaa",
+              GetGpuResolveExperimentEdramMsaaOption(msaa_combo).label)) {
+        for (size_t i = 0; i < GetGpuResolveExperimentEdramMsaaOptionCount();
+             ++i) {
+          const auto& option = GetGpuResolveExperimentEdramMsaaOption(i);
+          if (ImGui::Selectable(option.label, msaa_combo == int(i))) {
+            resolve_experiment_edram_msaa_ = option.value;
+            ApplyInt32Setting("GPU", "resolve_experiment_edram_msaa",
+                              option.value, true);
+          }
+        }
+        ImGui::EndCombo();
+      }
+
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::TextUnformatted("Fill half-pixel");
+      ImGui::TableSetColumnIndex(1);
+      int fill_combo = FindGpuResolveExperimentEdramFillHalfPixelComboIndex(
+          resolve_experiment_edram_fill_half_pixel_);
+      if (ImGui::BeginCombo(
+              "##resolve_experiment_edram_fill_half_pixel",
+              GetGpuResolveExperimentEdramFillHalfPixelOption(fill_combo)
+                  .label)) {
+        for (size_t i = 0;
+             i < GetGpuResolveExperimentEdramFillHalfPixelOptionCount(); ++i) {
+          const auto& option =
+              GetGpuResolveExperimentEdramFillHalfPixelOption(i);
+          if (ImGui::Selectable(option.label, fill_combo == int(i))) {
+            resolve_experiment_edram_fill_half_pixel_ = option.value;
+            ApplyInt32Setting("GPU", "resolve_experiment_edram_fill_half_pixel",
+                              option.value, true);
+          }
+        }
+        ImGui::EndCombo();
+      }
+      ImGui::EndTable();
+    }
+
+    if (ImGui::Checkbox("Override base_tiles",
+                        &resolve_experiment_edram_base_tiles_override_)) {
+      if (!resolve_experiment_edram_base_tiles_override_) {
+        resolve_experiment_edram_base_tiles_ = kGpuResolveExperimentAuto;
+        ApplyInt32Setting("GPU", "resolve_experiment_edram_base_tiles",
+                          kGpuResolveExperimentAuto, true);
+      } else if (resolve_experiment_edram_base_tiles_ <=
+                 kGpuResolveExperimentAuto) {
+        resolve_experiment_edram_base_tiles_ = 0;
+        ApplyInt32Setting("GPU", "resolve_experiment_edram_base_tiles", 0,
+                          true);
+      }
+    }
+    ImGui::BeginDisabled(!resolve_experiment_edram_base_tiles_override_);
+    if (ImGui::InputInt("base_tiles", &resolve_experiment_edram_base_tiles_, 1,
+                        16)) {
+      resolve_experiment_edram_base_tiles_ =
+          std::max(0, resolve_experiment_edram_base_tiles_);
+      ApplyInt32Setting("GPU", "resolve_experiment_edram_base_tiles",
+                        resolve_experiment_edram_base_tiles_, true);
+    }
+    ImGui::EndDisabled();
+
+    if (ImGui::Checkbox("Override pitch_tiles",
+                        &resolve_experiment_edram_pitch_tiles_override_)) {
+      if (!resolve_experiment_edram_pitch_tiles_override_) {
+        resolve_experiment_edram_pitch_tiles_ = kGpuResolveExperimentAuto;
+        ApplyInt32Setting("GPU", "resolve_experiment_edram_pitch_tiles",
+                          kGpuResolveExperimentAuto, true);
+      } else if (resolve_experiment_edram_pitch_tiles_ <=
+                 kGpuResolveExperimentAuto) {
+        resolve_experiment_edram_pitch_tiles_ = 0;
+        ApplyInt32Setting("GPU", "resolve_experiment_edram_pitch_tiles", 0,
+                          true);
+      }
+    }
+    ImGui::BeginDisabled(!resolve_experiment_edram_pitch_tiles_override_);
+    if (ImGui::InputInt("pitch_tiles", &resolve_experiment_edram_pitch_tiles_, 1,
+                        16)) {
+      resolve_experiment_edram_pitch_tiles_ =
+          std::max(0, resolve_experiment_edram_pitch_tiles_);
+      ApplyInt32Setting("GPU", "resolve_experiment_edram_pitch_tiles",
+                        resolve_experiment_edram_pitch_tiles_, true);
+    }
+    ImGui::EndDisabled();
+
+    if (ImGui::Checkbox("Override edram_offset_x_div_8",
+                        &resolve_experiment_edram_offset_x_override_)) {
+      if (!resolve_experiment_edram_offset_x_override_) {
+        resolve_experiment_edram_offset_x_div_8_ = kGpuResolveExperimentAuto;
+        ApplyInt32Setting("GPU", "resolve_experiment_edram_offset_x_div_8",
+                          kGpuResolveExperimentAuto, true);
+      } else if (resolve_experiment_edram_offset_x_div_8_ <=
+                 kGpuResolveExperimentAuto) {
+        resolve_experiment_edram_offset_x_div_8_ = 0;
+        ApplyInt32Setting("GPU", "resolve_experiment_edram_offset_x_div_8", 0,
+                          true);
+      }
+    }
+    ImGui::BeginDisabled(!resolve_experiment_edram_offset_x_override_);
+    if (ImGui::InputInt("edram_offset_x_div_8",
+                        &resolve_experiment_edram_offset_x_div_8_, 1, 4)) {
+      resolve_experiment_edram_offset_x_div_8_ =
+          std::clamp(resolve_experiment_edram_offset_x_div_8_, 0, 15);
+      ApplyInt32Setting("GPU", "resolve_experiment_edram_offset_x_div_8",
+                        resolve_experiment_edram_offset_x_div_8_, true);
+    }
+    ImGui::EndDisabled();
+
+    if (ImGui::Checkbox("Override edram_offset_y_div_8",
+                        &resolve_experiment_edram_offset_y_override_)) {
+      if (!resolve_experiment_edram_offset_y_override_) {
+        resolve_experiment_edram_offset_y_div_8_ = kGpuResolveExperimentAuto;
+        ApplyInt32Setting("GPU", "resolve_experiment_edram_offset_y_div_8",
+                          kGpuResolveExperimentAuto, true);
+      } else if (resolve_experiment_edram_offset_y_div_8_ <=
+                 kGpuResolveExperimentAuto) {
+        resolve_experiment_edram_offset_y_div_8_ = 0;
+        ApplyInt32Setting("GPU", "resolve_experiment_edram_offset_y_div_8", 0,
+                          true);
+      }
+    }
+    ImGui::BeginDisabled(!resolve_experiment_edram_offset_y_override_);
+    if (ImGui::InputInt("edram_offset_y_div_8",
+                        &resolve_experiment_edram_offset_y_div_8_, 1, 1)) {
+      resolve_experiment_edram_offset_y_div_8_ =
+          std::clamp(resolve_experiment_edram_offset_y_div_8_, 0, 1);
+      ApplyInt32Setting("GPU", "resolve_experiment_edram_offset_y_div_8",
+                        resolve_experiment_edram_offset_y_div_8_, true);
+    }
+    ImGui::EndDisabled();
+  }
+
+  if (ImGui::CollapsingHeader("Destination format (RB_COPY_DEST)",
+                              ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (ImGui::BeginTable("##resolve_exp_dest", 2,
+                          ImGuiTableFlags_SizingStretchProp)) {
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::TextUnformatted("copy_dest_format");
+      ImGui::TableSetColumnIndex(1);
+      int dest_format_combo = FindGpuResolveExperimentDestFormatComboIndex(
+          resolve_experiment_dest_format_);
+      if (ImGui::BeginCombo(
+              "##resolve_experiment_dest_format",
+              GetGpuResolveExperimentDestFormatOption(dest_format_combo)
+                  .label)) {
+        for (size_t i = 0; i < GetGpuResolveExperimentDestFormatOptionCount();
+             ++i) {
+          const auto& option = GetGpuResolveExperimentDestFormatOption(i);
+          if (ImGui::Selectable(option.label, dest_format_combo == int(i))) {
+            resolve_experiment_dest_format_ = option.value;
+            ApplyInt32Setting("GPU", "resolve_experiment_dest_format",
+                              option.value, true);
+          }
+        }
+        ImGui::EndCombo();
+      }
+
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::TextUnformatted("copy_sample_select");
+      ImGui::TableSetColumnIndex(1);
+      int copy_sample_combo = FindGpuResolveExperimentCopySampleComboIndex(
+          resolve_experiment_copy_sample_select_);
+      if (ImGui::BeginCombo(
+              "##resolve_experiment_copy_sample_select",
+              GetGpuResolveExperimentCopySampleOption(copy_sample_combo)
+                  .label)) {
+        for (size_t i = 0; i < GetGpuResolveExperimentCopySampleOptionCount();
+             ++i) {
+          const auto& option = GetGpuResolveExperimentCopySampleOption(i);
+          if (ImGui::Selectable(option.label, copy_sample_combo == int(i))) {
+            resolve_experiment_copy_sample_select_ = option.value;
+            ApplyInt32Setting("GPU", "resolve_experiment_copy_sample_select",
+                              option.value, true);
+          }
+        }
+        ImGui::EndCombo();
+      }
+      ImGui::EndTable();
+    }
+
+    int dest_swap_combo = resolve_experiment_copy_dest_swap_ + 1;
+    if (dest_swap_combo < 0) {
+      dest_swap_combo = 0;
+    }
+    const char* dest_swap_labels[] = {"Auto (RB)", "Off", "On"};
+    if (ImGui::BeginCombo("copy_dest_swap##resolve_experiment",
+                          dest_swap_labels[dest_swap_combo])) {
+      for (int i = 0; i < 3; ++i) {
+        if (ImGui::Selectable(dest_swap_labels[i], dest_swap_combo == i)) {
+          resolve_experiment_copy_dest_swap_ = i - 1;
+          ApplyInt32Setting("GPU", "resolve_experiment_copy_dest_swap", i - 1,
+                            true);
+        }
+      }
+      ImGui::EndCombo();
+    }
+
+    if (ImGui::Checkbox("Override dest_offset_x_div_8",
+                        &resolve_experiment_dest_offset_x_override_)) {
+      if (!resolve_experiment_dest_offset_x_override_) {
+        resolve_experiment_dest_offset_x_div_8_ = kGpuResolveExperimentAuto;
+        ApplyInt32Setting("GPU", "resolve_experiment_dest_offset_x_div_8",
+                          kGpuResolveExperimentAuto, true);
+      } else if (resolve_experiment_dest_offset_x_div_8_ <=
+                 kGpuResolveExperimentAuto) {
+        resolve_experiment_dest_offset_x_div_8_ = 0;
+        ApplyInt32Setting("GPU", "resolve_experiment_dest_offset_x_div_8", 0,
+                          true);
+      }
+    }
+    ImGui::BeginDisabled(!resolve_experiment_dest_offset_x_override_);
+    if (ImGui::InputInt("dest_offset_x_div_8",
+                        &resolve_experiment_dest_offset_x_div_8_, 1, 4)) {
+      resolve_experiment_dest_offset_x_div_8_ =
+          std::clamp(resolve_experiment_dest_offset_x_div_8_, 0, 15);
+      ApplyInt32Setting("GPU", "resolve_experiment_dest_offset_x_div_8",
+                        resolve_experiment_dest_offset_x_div_8_, true);
+    }
+    ImGui::EndDisabled();
+
+    if (ImGui::Checkbox("Override dest_offset_y_div_8",
+                        &resolve_experiment_dest_offset_y_override_)) {
+      if (!resolve_experiment_dest_offset_y_override_) {
+        resolve_experiment_dest_offset_y_div_8_ = kGpuResolveExperimentAuto;
+        ApplyInt32Setting("GPU", "resolve_experiment_dest_offset_y_div_8",
+                          kGpuResolveExperimentAuto, true);
+      } else if (resolve_experiment_dest_offset_y_div_8_ <=
+                 kGpuResolveExperimentAuto) {
+        resolve_experiment_dest_offset_y_div_8_ = 0;
+        ApplyInt32Setting("GPU", "resolve_experiment_dest_offset_y_div_8", 0,
+                          true);
+      }
+    }
+    ImGui::BeginDisabled(!resolve_experiment_dest_offset_y_override_);
+    if (ImGui::InputInt("dest_offset_y_div_8",
+                        &resolve_experiment_dest_offset_y_div_8_, 1, 4)) {
+      resolve_experiment_dest_offset_y_div_8_ =
+          std::clamp(resolve_experiment_dest_offset_y_div_8_, 0, 15);
+      ApplyInt32Setting("GPU", "resolve_experiment_dest_offset_y_div_8",
+                        resolve_experiment_dest_offset_y_div_8_, true);
+    }
+    ImGui::EndDisabled();
+  }
+
+  if (ImGui::CollapsingHeader("Source / destination bias",
+                              ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (ImGui::Checkbox("Override color_exp_bias",
+                        &resolve_experiment_color_exp_bias_override_)) {
+      if (!resolve_experiment_color_exp_bias_override_) {
+        resolve_experiment_color_exp_bias_ =
+            kGpuResolveExperimentColorExpBiasAuto;
+        ApplyInt32Setting("GPU", "resolve_experiment_color_exp_bias",
+                          kGpuResolveExperimentColorExpBiasAuto, true);
+      } else if (resolve_experiment_color_exp_bias_ <=
+                 kGpuResolveExperimentColorExpBiasAuto) {
+        resolve_experiment_color_exp_bias_ = 0;
+        ApplyInt32Setting("GPU", "resolve_experiment_color_exp_bias", 0, true);
+      }
+    }
+    ImGui::BeginDisabled(!resolve_experiment_color_exp_bias_override_);
+    if (ImGui::SliderInt("color_exp_bias", &resolve_experiment_color_exp_bias_,
+                         -32, 31)) {
+      ApplyInt32Setting("GPU", "resolve_experiment_color_exp_bias",
+                        resolve_experiment_color_exp_bias_, true);
+    }
+    ImGui::EndDisabled();
+
+    if (ImGui::Checkbox("Override dest exp_bias",
+                        &resolve_experiment_dest_exp_bias_override_)) {
+      if (!resolve_experiment_dest_exp_bias_override_) {
+        resolve_experiment_dest_exp_bias_ = kGpuResolveExperimentDestExpBiasAuto;
+        ApplyInt32Setting("GPU", "resolve_experiment_dest_exp_bias",
+                          kGpuResolveExperimentDestExpBiasAuto, true);
+      } else if (resolve_experiment_dest_exp_bias_ <=
+                 kGpuResolveExperimentDestExpBiasAuto) {
+        resolve_experiment_dest_exp_bias_ = 0;
+        ApplyInt32Setting("GPU", "resolve_experiment_dest_exp_bias", 0, true);
+      }
+    }
+    ImGui::BeginDisabled(!resolve_experiment_dest_exp_bias_override_);
+    if (ImGui::SliderInt("dest exp_bias", &resolve_experiment_dest_exp_bias_,
+                         -32, 31)) {
+      ApplyInt32Setting("GPU", "resolve_experiment_dest_exp_bias",
+                        resolve_experiment_dest_exp_bias_, true);
+    }
+    ImGui::EndDisabled();
+    if (ImGui::Checkbox("resolve_clear_exp_bias_on_zero",
+                        &resolve_clear_exp_bias_on_zero_)) {
+      ApplyBoolSetting("GPU", "resolve_clear_exp_bias_on_zero",
+                       resolve_clear_exp_bias_on_zero_, true);
+    }
+  }
+
+  if (ImGui::CollapsingHeader("Scene export behavior",
+                              ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (ImGui::Checkbox("Scene export tile patch",
+                        &resolve_experiment_scene_export_tile_patch_)) {
+      ApplyBoolSetting("GPU", "resolve_experiment_scene_export_tile_patch",
+                       resolve_experiment_scene_export_tile_patch_, true);
+    }
+    if (ImGui::Checkbox("Allow repeat Full64 overwrite",
+                        &resolve_experiment_allow_repeat_full64_overwrite_)) {
+      ApplyBoolSetting("GPU", "resolve_experiment_allow_repeat_full64_overwrite",
+                       resolve_experiment_allow_repeat_full64_overwrite_, true);
+    }
+    if (ImGui::Checkbox("skip_repeat_resolve_to_same_dest",
+                        &skip_repeat_resolve_to_same_dest_)) {
+      ApplyBoolSetting("GPU", "skip_repeat_resolve_to_same_dest",
+                       skip_repeat_resolve_to_same_dest_, true);
+    }
+    if (ImGui::Checkbox("reload_textures_after_resolve",
+                        &reload_textures_after_resolve_)) {
+      ApplyBoolSetting("GPU", "reload_textures_after_resolve",
+                       reload_textures_after_resolve_, true);
+    }
+    if (ImGui::Checkbox("gamma_render_target_as_unorm16",
+                        &gamma_render_target_as_unorm16_)) {
+      ApplyBoolSetting("GPU", "gamma_render_target_as_unorm16",
+                       gamma_render_target_as_unorm16_, true);
+    }
+  }
 }
 
 void ImGuiDebugDialog::OnDraw(ImGuiIO& io) {
@@ -650,10 +1154,18 @@ void ImGuiDebugDialog::OnDraw(ImGuiIO& io) {
   ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
   ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 0.0f);
 
-  // Center on screen
-  ImVec2 center = ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f);
-  ImGui::SetNextWindowPos(center, ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
-  ImGui::SetNextWindowSize(ImVec2(480.0f, 580.0f), ImGuiCond_FirstUseEver);
+  ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoCollapse;
+  if (external_window_) {
+    ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+    ImGui::SetNextWindowSize(io.DisplaySize);
+    window_flags |= ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
+                    ImGuiWindowFlags_NoTitleBar;
+  } else {
+    ImVec2 center =
+        ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f);
+    ImGui::SetNextWindowPos(center, ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(560.0f, 720.0f), ImGuiCond_FirstUseEver);
+  }
 
   const char* anisotropic_labels[] = {"Auto (-1)", "Off (0)", "1x", "2x",
                                       "4x",        "8x",      "16x"};
@@ -702,6 +1214,8 @@ void ImGuiDebugDialog::OnDraw(ImGuiIO& io) {
       "resolve_clear_exp_bias_on_zero",
       "gamma_render_target_as_unorm16",
       "resolve_resolution_scale_fill_half_pixel_offset",
+      "skip_repeat_resolve_to_same_dest",
+      "resolve_experiment_",
   });
   bool show_shader = AnyMatchesFilter({
       "use_fuzzy_alpha_epsilon",
@@ -744,22 +1258,34 @@ void ImGuiDebugDialog::OnDraw(ImGuiIO& io) {
                      show_conversion || show_logging || show_cpu_tracing;
 
   bool is_open = true;
-  if (ImGui::Begin("Debug Settings", &is_open, ImGuiWindowFlags_NoCollapse)) {
+  if (ImGui::Begin("Debug Settings", &is_open, window_flags)) {
     // Handle keyboard escape, F8, or gamepad B/Back
     if (ImGui::IsKeyPressed(ImGuiKey_Escape) ||
         ImGui::IsKeyPressed(ImGuiKey_F8) || ShouldCloseFromGamepad()) {
       Close();
     }
-    if (ImGui::IsKeyPressed(ImGuiKey_LeftBracket) ||
-        ImGui::IsKeyPressed(ImGuiKey_PageUp)) {
-      StepGpuSceneExportTestPreset(-1);
-    }
-    if (ImGui::IsKeyPressed(ImGuiKey_RightBracket) ||
-        ImGui::IsKeyPressed(ImGuiKey_PageDown)) {
-      StepGpuSceneExportTestPreset(1);
+
+    if (external_window_) {
+      ImGui::TextUnformatted("UI Scale");
+      ImGui::SameLine();
+      ImGui::SetNextItemWidth(180.0f);
+      if (ImGui::SliderFloat("##debug_settings_ui_scale", &ui_scale_, 0.75f, 3.0f,
+                             "%.2fx")) {
+        g_debug_settings_ui_scale = ui_scale_;
+        imgui_drawer()->SetUiScaleMultiplier(ui_scale_);
+      }
+      ImGui::SameLine();
+      if (ImGui::Button("Reset##debug_settings_ui_scale")) {
+        ui_scale_ = 1.5f;
+        g_debug_settings_ui_scale = ui_scale_;
+        imgui_drawer()->SetUiScaleMultiplier(ui_scale_);
+      }
+      ImGui::Spacing();
+      ImGui::Separator();
+      ImGui::Spacing();
     }
 
-    DrawGpuSceneExportTestPresets();
+    DrawGpuResolveExperimentPanel();
     ImGui::Spacing();
     ImGui::Separator();
     ImGui::Spacing();
@@ -776,8 +1302,8 @@ void ImGuiDebugDialog::OnDraw(ImGuiIO& io) {
     ImGui::Separator();
     ImGui::Spacing();
 
-    if (ImGui::BeginChild("##debug_settings_scroll", ImVec2(0.0f, 0.0f),
-                          false)) {
+    ImGui::BeginChild("##debug_settings_scroll", ImVec2(0.0f, 0.0f), false);
+    {
       if (show_common &&
           BeginSection("Common Overrides", true, filter_active)) {
         if (BeginSettingsTable("##debug_common_overrides")) {
@@ -1459,9 +1985,8 @@ void ImGuiDebugDialog::OnDraw(ImGuiIO& io) {
       if (!any_visible) {
         ImGui::TextDisabled("No results.");
       }
-
-      ImGui::EndChild();
     }
+    ImGui::EndChild();
 
     ImGui::End();
   }

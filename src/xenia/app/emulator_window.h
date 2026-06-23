@@ -20,7 +20,7 @@
 #include "xenia/ui/imgui_audio_dialog.h"
 #include "xenia/ui/imgui_confirm_dialog.h"
 #include "xenia/ui/imgui_context_menu.h"
-#include "xenia/ui/imgui_debug_dialog.h"
+#include "xenia/ui/imgui_debug_settings_window.h"
 #include "xenia/ui/imgui_dialog.h"
 #include "xenia/ui/imgui_drawer.h"
 #include "xenia/ui/imgui_performance_dialog.h"
@@ -265,7 +265,7 @@ class EmulatorWindow {
 
   ui::ImGuiPostProcessingDialog* postprocessing_dialog_ = nullptr;
   ui::ImGuiPerformanceDialog* performance_dialog_ = nullptr;
-  ui::ImGuiDebugDialog* debug_dialog_ = nullptr;
+  std::unique_ptr<ui::ImGuiDebugSettingsWindow> debug_settings_window_;
   ProfileConfigDialog* profile_dialog_ = nullptr;
   ui::ImGuiAudioDialog* audio_dialog_ = nullptr;
   ui::ImGuiContextMenu* context_menu_ = nullptr;

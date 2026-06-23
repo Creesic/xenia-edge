@@ -43,7 +43,7 @@
 #include "xenia/ui/imgui_audio_dialog.h"
 #include "xenia/ui/imgui_confirm_dialog.h"
 #include "xenia/ui/imgui_context_menu.h"
-#include "xenia/ui/imgui_debug_dialog.h"
+#include "xenia/ui/imgui_debug_settings_window.h"
 #include "xenia/ui/imgui_performance_dialog.h"
 #include "xenia/ui/imgui_postprocessing_dialog.h"
 #include "xenia/ui/profile_dialogs.h"
@@ -2236,15 +2236,18 @@ void EmulatorWindow::TogglePerformanceTuningDialog() {
 }
 
 void EmulatorWindow::ToggleDebugSettingsDialog() {
-  if (debug_dialog_) {
-    debug_dialog_->CloseDialog();
-    debug_dialog_ = nullptr;
+  if (debug_settings_window_) {
+    debug_settings_window_->Close();
     return;
   }
 
-  debug_dialog_ = new ui::ImGuiDebugDialog(imgui_drawer(), this,
-                                           emulator()->input_system());
-  debug_dialog_->SetOnCloseCallback([this]() { debug_dialog_ = nullptr; });
+  debug_settings_window_ = ui::ImGuiDebugSettingsWindow::Create(this, app_context_);
+  if (!debug_settings_window_) {
+    return;
+  }
+  debug_settings_window_->SetOnClosedCallback([this]() {
+    debug_settings_window_.reset();
+  });
 }
 
 void EmulatorWindow::RefreshProfileMenu() {
@@ -3875,9 +3878,8 @@ void EmulatorWindow::ClearDialogs() {
     performance_dialog_->CloseDialog();
     performance_dialog_ = nullptr;
   }
-  if (debug_dialog_) {
-    debug_dialog_->CloseDialog();
-    debug_dialog_ = nullptr;
+  if (debug_settings_window_) {
+    debug_settings_window_.reset();
   }
   if (profile_dialog_) {
     profile_dialog_->CloseDialog();

@@ -82,6 +82,29 @@ DECLARE_bool(skip_repeat_resolve_to_same_dest);
 
 DECLARE_bool(resolve_clear_exp_bias_on_zero);
 
+// Live resolve/scene-export experiments (Debug Settings panel). -1/-999 = off.
+DECLARE_int32(resolve_experiment_edram_format);
+DECLARE_int32(resolve_experiment_edram_64bpp);
+DECLARE_int32(resolve_experiment_dest_exp_bias);
+DECLARE_int32(resolve_experiment_force_path);
+DECLARE_int32(resolve_experiment_dest_bpp);
+DECLARE_int32(resolve_experiment_edram_base_tiles);
+DECLARE_int32(resolve_experiment_edram_pitch_tiles);
+DECLARE_int32(resolve_experiment_edram_msaa);
+DECLARE_int32(resolve_experiment_edram_fill_half_pixel);
+DECLARE_int32(resolve_experiment_edram_offset_x_div_8);
+DECLARE_int32(resolve_experiment_edram_offset_y_div_8);
+DECLARE_int32(resolve_experiment_dest_offset_x_div_8);
+DECLARE_int32(resolve_experiment_dest_offset_y_div_8);
+DECLARE_int32(resolve_experiment_copy_dest_swap);
+DECLARE_int32(resolve_experiment_dest_format);
+DECLARE_int32(resolve_experiment_copy_sample_select);
+DECLARE_int32(resolve_experiment_color_exp_bias);
+DECLARE_bool(resolve_experiment_force_fast_ignore_guards);
+DECLARE_bool(resolve_experiment_disable_float16_unorm_full);
+DECLARE_bool(resolve_experiment_scene_export_tile_patch);
+DECLARE_bool(resolve_experiment_allow_repeat_full64_overwrite);
+
 DECLARE_bool(gpu_3d_to_2d_texture);
 
 DECLARE_bool(ac6_ground_fix);

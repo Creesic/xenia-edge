@@ -31,7 +31,8 @@ namespace ui {
 class ImGuiDebugDialog : public ImGuiGamepadDialog {
  public:
   ImGuiDebugDialog(ImGuiDrawer* drawer, app::EmulatorWindow* emulator_window,
-                   hid::InputSystem* input_system);
+                   hid::InputSystem* input_system,
+                   bool external_window = false);
 
   void CloseDialog() { Close(); }
 
@@ -72,12 +73,12 @@ class ImGuiDebugDialog : public ImGuiGamepadDialog {
   void ApplyLogMask();
   void ApplyScribbleHeapValue();
 
-  void DrawGpuSceneExportTestPresets();
-  void ApplyGpuSceneExportTestPresetAt(size_t index);
-  void StepGpuSceneExportTestPreset(int delta);
+  void DrawGpuResolveExperimentPanel();
 
   app::EmulatorWindow* emulator_window_;
   std::function<void()> on_close_callback_;
+  bool external_window_ = false;
+  float ui_scale_ = 1.5f;
 
   // Cached settings values.
   // Common Overrides
@@ -98,6 +99,36 @@ class ImGuiDebugDialog : public ImGuiGamepadDialog {
   bool resolve_clear_exp_bias_on_zero_;
   bool gamma_render_target_as_unorm16_;
   bool resolve_resolution_scale_fill_half_pixel_offset_;
+  bool skip_repeat_resolve_to_same_dest_;
+  int32_t resolve_experiment_edram_format_;
+  int32_t resolve_experiment_edram_64bpp_;
+  int32_t resolve_experiment_dest_exp_bias_;
+  bool resolve_experiment_dest_exp_bias_override_;
+  int32_t resolve_experiment_force_path_;
+  int32_t resolve_experiment_dest_bpp_;
+  int32_t resolve_experiment_edram_base_tiles_;
+  bool resolve_experiment_edram_base_tiles_override_;
+  int32_t resolve_experiment_edram_pitch_tiles_;
+  bool resolve_experiment_edram_pitch_tiles_override_;
+  int32_t resolve_experiment_edram_msaa_;
+  int32_t resolve_experiment_edram_fill_half_pixel_;
+  int32_t resolve_experiment_edram_offset_x_div_8_;
+  bool resolve_experiment_edram_offset_x_override_;
+  int32_t resolve_experiment_edram_offset_y_div_8_;
+  bool resolve_experiment_edram_offset_y_override_;
+  int32_t resolve_experiment_dest_offset_x_div_8_;
+  bool resolve_experiment_dest_offset_x_override_;
+  int32_t resolve_experiment_dest_offset_y_div_8_;
+  bool resolve_experiment_dest_offset_y_override_;
+  int32_t resolve_experiment_copy_dest_swap_;
+  int32_t resolve_experiment_dest_format_;
+  int32_t resolve_experiment_copy_sample_select_;
+  int32_t resolve_experiment_color_exp_bias_;
+  bool resolve_experiment_color_exp_bias_override_;
+  bool resolve_experiment_force_fast_ignore_guards_;
+  bool resolve_experiment_disable_float16_unorm_full_;
+  bool resolve_experiment_scene_export_tile_patch_;
+  bool resolve_experiment_allow_repeat_full64_overwrite_;
   // Shader / Driver Workarounds
   bool use_fuzzy_alpha_epsilon_;
   bool precise_interpolation_;
@@ -135,8 +166,6 @@ class ImGuiDebugDialog : public ImGuiGamepadDialog {
   char log_level_buffer_[32] = {};
   char log_mask_buffer_[32] = {};
   char scribble_heap_value_buffer_[32] = {};
-
-  size_t gpu_scene_export_test_index_ = 0;
 };
 
 }  // namespace ui

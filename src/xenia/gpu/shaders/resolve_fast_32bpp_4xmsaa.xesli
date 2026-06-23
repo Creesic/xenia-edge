@@ -84,6 +84,7 @@ entry_inputs_end_code_begin_compute_xe
     pixels_0123.x = pixels_0123.y;
   }
   XeResolveSwap8PixelsRedBlue32bpp(resolve_info, pixels_0123, pixels_4567);
+  XeResolveFast32bppRepackForDest(resolve_info, pixels_0123, pixels_4567);
   uint dest_address = XeResolveDestPixelAddress(resolve_info, pixel_index, 2u);
   byte_buffer_align16_store16_xe(
       xe_resolve_dest, dest_address,

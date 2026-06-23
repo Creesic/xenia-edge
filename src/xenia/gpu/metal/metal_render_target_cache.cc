@@ -4665,7 +4665,8 @@ bool MetalRenderTargetCache::Resolve(Memory& memory, uint32_t& written_address,
       GetResolveCopyDestFrameState(resolve_info);
   const bool copy_dest_is_repeat =
       copy_dest_state == ResolveCopyDestFrameState::kRepeatExport;
-  if (copy_dest_is_repeat && cvars::skip_repeat_resolve_to_same_dest) {
+  if (copy_dest_is_repeat && cvars::skip_repeat_resolve_to_same_dest &&
+      !draw_util::ShouldAllowRepeatSceneExportOverwrite(resolve_info)) {
     return true;
   }
 

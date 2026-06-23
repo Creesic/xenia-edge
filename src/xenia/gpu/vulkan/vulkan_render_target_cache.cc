@@ -1086,8 +1086,8 @@ bool VulkanRenderTargetCache::Resolve(const Memory& memory,
                                               resolve_info);
       command_processor_.PushDebugMarker("%s", label);
     }
-    if (copy_dest_is_repeat &&
-        cvars::skip_repeat_resolve_to_same_dest) {
+    if (copy_dest_is_repeat && cvars::skip_repeat_resolve_to_same_dest &&
+        !draw_util::ShouldAllowRepeatSceneExportOverwrite(resolve_info)) {
       // Keep the first resolve export in guest memory and the matching GPU
       // texture upload from that resolve.
       copied = true;

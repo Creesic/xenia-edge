@@ -568,6 +568,7 @@ void RenderTargetCache::BeginFrame() {
   ResetAccumulatedRenderTargets();
   resolve_copy_dests_this_frame_.clear();
   draw_util::ResetSceneExportResolvePatchState();
+  draw_util::ResetFsiResolvePatchState();
 }
 
 void RenderTargetCache::PatchSceneExportResolveInfo(
@@ -607,6 +608,9 @@ bool RenderTargetCache::CheckResolveCopyDestRepeat(
   }
   if (GetResolveCopyDestFrameState(resolve_info) ==
       ResolveCopyDestFrameState::kRepeatExport) {
+    if (draw_util::ShouldAllowRepeatSceneExportOverwrite(resolve_info)) {
+      return false;
+    }
     XELOGI(
         "Resolve: skipping repeat copy to guest 0x{:08X}+0x{:X} (already "
         "exported this frame)",
@@ -700,6 +704,9 @@ bool RenderTargetCache::Update(bool is_rasterization_done,
       uint32_t rt_bit_index = 1 + i;
       depth_and_color_rts_used_bits |= uint32_t(1) << rt_bit_index;
       edram_bases[rt_bit_index] = color_info.color_base;
+      if (interlock_barrier_only) {
+        draw_util::NotifyFsiColorDrawBase(i, color_info.color_base);
+      }
       xenos::ColorRenderTargetFormat color_format =
           regs.Get<reg::RB_COLOR_INFO>(
                   reg::RB_COLOR_INFO::rt_register_indices[i])

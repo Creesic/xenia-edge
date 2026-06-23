@@ -805,6 +805,38 @@ uint XeResolveEdramPixelStrideBytes(XeResolveInfo resolve_info) {
            ((pixels >> 20u) & 0x3FFu);
   }
 
+  // Fast resolve copies EDRAM verbatim, but some games resolve k_2_10_10_10
+  // UNorm into k_8_8_8_8 guest textures. Repack 10-bit UNorm to 8-bit UNorm.
+  void XeResolveFast32bppRepackForDest(
+      XeResolveInfo resolve_info, inout_param_xe(uint4_xe, pixels_0123),
+      inout_param_xe(uint4_xe, pixels_4567)) {
+    dont_flatten_xe
+    if (resolve_info.dest_format != kXenosFormat_8_8_8_8 &&
+        resolve_info.dest_format != kXenosFormat_8_8_8_8_A) {
+      return;
+    }
+    dont_flatten_xe
+    if (resolve_info.edram_format != kXenosColorRenderTargetFormat_2_10_10_10 &&
+        resolve_info.edram_format !=
+            kXenosColorRenderTargetFormat_2_10_10_10_AS_10_10_10_10) {
+      return;
+    }
+    float4_xe pixel_0 = XeUnpackR10G10B10A2UNorm(pixels_0123.x);
+    float4_xe pixel_1 = XeUnpackR10G10B10A2UNorm(pixels_0123.y);
+    float4_xe pixel_2 = XeUnpackR10G10B10A2UNorm(pixels_0123.z);
+    float4_xe pixel_3 = XeUnpackR10G10B10A2UNorm(pixels_0123.w);
+    float4_xe pixel_4 = XeUnpackR10G10B10A2UNorm(pixels_4567.x);
+    float4_xe pixel_5 = XeUnpackR10G10B10A2UNorm(pixels_4567.y);
+    float4_xe pixel_6 = XeUnpackR10G10B10A2UNorm(pixels_4567.z);
+    float4_xe pixel_7 = XeUnpackR10G10B10A2UNorm(pixels_4567.w);
+    pixels_0123 = uint4_xe(
+        XePackR8G8B8A8UNorm(pixel_0), XePackR8G8B8A8UNorm(pixel_1),
+        XePackR8G8B8A8UNorm(pixel_2), XePackR8G8B8A8UNorm(pixel_3));
+    pixels_4567 = uint4_xe(
+        XePackR8G8B8A8UNorm(pixel_4), XePackR8G8B8A8UNorm(pixel_5),
+        XePackR8G8B8A8UNorm(pixel_6), XePackR8G8B8A8UNorm(pixel_7));
+  }
+
   void XeResolveSwap8PixelsRedBlue32bpp(
       XeResolveInfo resolve_info, inout_param_xe(uint4_xe, pixels_0123),
       inout_param_xe(uint4_xe, pixels_4567)) {

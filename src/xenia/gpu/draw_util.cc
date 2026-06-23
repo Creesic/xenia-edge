@@ -1021,78 +1021,74 @@ struct SceneExportResolvePatchState {
 
 SceneExportResolvePatchState scene_export_resolve_patch;
 
-bool IsFloat16EdramResolveSource(const ResolveEdramInfo& edram_info) {
-  if (!edram_info.format_is_64bpp) {
-    return false;
-  }
-  switch (xenos::ColorRenderTargetFormat(edram_info.format)) {
-    case xenos::ColorRenderTargetFormat::k_16_16_16_16_FLOAT:
-    case xenos::ColorRenderTargetFormat::k_16_16_FLOAT:
-      return true;
-    default:
-      return false;
-  }
-}
+struct FsiResolvePatchState {
+  uint32_t last_color_base_tiles[xenos::kMaxColorRenderTargets] = {};
+  bool valid = false;
+};
 
-bool SceneExportEdramInfoNeedsPatch(const ResolveEdramInfo& current,
-                                    const ResolveEdramInfo& cached) {
-  if (!current.base_tiles && cached.base_tiles) {
-    return true;
-  }
-  if (current.format_is_64bpp &&
-      xenos::ColorRenderTargetFormat(cached.format) ==
-          xenos::ColorRenderTargetFormat::k_16_16_16_16_FLOAT &&
-      current.format != cached.format) {
-    return true;
-  }
-  return false;
-}
+FsiResolvePatchState fsi_resolve_patch;
 
-void ApplySceneExportEdramPatch(ResolveEdramInfo& current,
-                                const ResolveEdramInfo& cached) {
-  if (!current.base_tiles && cached.base_tiles) {
-    current.base_tiles = cached.base_tiles;
+void PatchFsiResolveEdramBaseInPlace(ResolveInfo& resolve_info) {
+  if (!fsi_resolve_patch.valid || resolve_info.IsCopyingDepth()) {
+    return;
   }
-  if (current.format_is_64bpp &&
-      xenos::ColorRenderTargetFormat(cached.format) ==
-          xenos::ColorRenderTargetFormat::k_16_16_16_16_FLOAT &&
-      current.format != cached.format) {
-    current.format = cached.format;
+  const uint32_t rt_index = resolve_info.rb_copy_control.copy_src_select;
+  if (rt_index >= xenos::kMaxColorRenderTargets) {
+    return;
   }
+  // Only adjust surface-origin resolves; sub-tile offsets already encode
+  // position within the tile span starting at base_tiles.
+  if (resolve_info.coordinate_info.edram_offset_x_div_8 ||
+      resolve_info.coordinate_info.edram_offset_y_div_8) {
+    return;
+  }
+  const uint32_t last_base = fsi_resolve_patch.last_color_base_tiles[rt_index];
+  const uint32_t base_delta = resolve_info.color_edram_info.base_tiles -
+                              resolve_info.color_original_base;
+  const uint32_t patched_base = last_base + base_delta;
+  if (patched_base == resolve_info.color_edram_info.base_tiles) {
+    return;
+  }
+  XELOGI(
+      "Resolve: FSI surface-origin base {} -> {} for RT{} guest 0x{:08X}+0x{:X}",
+      resolve_info.color_edram_info.base_tiles, patched_base, rt_index,
+      resolve_info.copy_dest_extent_start,
+      resolve_info.copy_dest_extent_length);
+  resolve_info.color_edram_info.base_tiles = patched_base;
 }
 
 void CacheSceneExportResolveSource(const ResolveInfo& resolve_info) {
-  if (resolve_info.IsCopyingDepth()) {
+  if (resolve_info.IsCopyingDepth() ||
+      !resolve_info.color_edram_info.base_tiles) {
     return;
   }
-  const ResolveEdramInfo& edram_info = resolve_info.color_edram_info;
-  if (!IsFloat16EdramResolveSource(edram_info) && !edram_info.base_tiles) {
-    return;
-  }
-  scene_export_resolve_patch.color_edram_info = edram_info;
+  scene_export_resolve_patch.color_edram_info = resolve_info.color_edram_info;
   scene_export_resolve_patch.color_original_base =
       resolve_info.color_original_base;
   scene_export_resolve_patch.valid = true;
 }
 
 bool TryGetSceneExportCachedEdramInfo(ResolveEdramInfo& edram_info_out) {
-  if (!scene_export_resolve_patch.valid) {
+  if (!scene_export_resolve_patch.valid ||
+      !scene_export_resolve_patch.color_edram_info.base_tiles ||
+      edram_info_out.base_tiles) {
     return false;
   }
-  const ResolveEdramInfo& cached = scene_export_resolve_patch.color_edram_info;
-  if (!SceneExportEdramInfoNeedsPatch(edram_info_out, cached)) {
-    return false;
-  }
-  ApplySceneExportEdramPatch(edram_info_out, cached);
+  edram_info_out = scene_export_resolve_patch.color_edram_info;
   return true;
 }
 
 void PatchSceneExportResolveInfoInPlace(ResolveInfo& resolve_info) {
-  if (resolve_info.IsCopyingDepth()) {
+  if (!cvars::resolve_experiment_scene_export_tile_patch ||
+      resolve_info.IsCopyingDepth()) {
     return;
   }
-  CacheSceneExportResolveSource(resolve_info);
-  if (!scene_export_resolve_patch.valid) {
+  if (resolve_info.color_edram_info.base_tiles) {
+    CacheSceneExportResolveSource(resolve_info);
+    return;
+  }
+  if (!scene_export_resolve_patch.valid ||
+      !scene_export_resolve_patch.color_edram_info.base_tiles) {
     return;
   }
   const xenos::TextureFormat dest_texture_format =
@@ -1102,28 +1098,23 @@ void PatchSceneExportResolveInfoInPlace(ResolveInfo& resolve_info) {
       IsFloatTextureFormat(dest_texture_format)) {
     return;
   }
-  ResolveEdramInfo& current = resolve_info.color_edram_info;
-  const ResolveEdramInfo& cached = scene_export_resolve_patch.color_edram_info;
-  if (!SceneExportEdramInfoNeedsPatch(current, cached)) {
-    return;
-  }
-  const uint32_t old_tiles = current.base_tiles;
-  const uint32_t old_format = current.format;
-  ApplySceneExportEdramPatch(current, cached);
-  if (cached.base_tiles) {
-    resolve_info.color_original_base =
-        scene_export_resolve_patch.color_original_base;
-  }
   XELOGI(
-      "Resolve: patching scene export EDRAM source tiles {} -> {}, format {} "
-      "-> {} for guest 0x{:08X}+0x{:X}",
-      old_tiles, current.base_tiles, old_format, current.format,
+      "Resolve: patching scene export EDRAM source tiles {} -> {} for guest "
+      "0x{:08X}+0x{:X}",
+      resolve_info.color_edram_info.base_tiles,
+      scene_export_resolve_patch.color_edram_info.base_tiles,
       resolve_info.copy_dest_extent_start, resolve_info.copy_dest_extent_length);
+  resolve_info.color_edram_info = scene_export_resolve_patch.color_edram_info;
+  resolve_info.color_original_base =
+      scene_export_resolve_patch.color_original_base;
 }
 
 bool TryPatchSceneExportEdramInfoForFullExport(
     ResolveEdramInfo& edram_info, const ResolveInfo& resolve_info,
     ResolveCopyShaderIndex shader) {
+  if (!cvars::resolve_experiment_scene_export_tile_patch) {
+    return false;
+  }
   CacheSceneExportResolveSource(resolve_info);
   if (shader != ResolveCopyShaderIndex::kFull64bpp ||
       !TryGetSceneExportCachedEdramInfo(edram_info)) {
@@ -1140,6 +1131,43 @@ bool TryPatchSceneExportEdramInfoForFullExport(
 
 void ResetSceneExportResolvePatchState() {
   scene_export_resolve_patch = SceneExportResolvePatchState();
+}
+
+void NotifyFsiColorDrawBase(uint32_t rt_index, uint32_t color_base_tiles) {
+  if (rt_index >= xenos::kMaxColorRenderTargets) {
+    return;
+  }
+  fsi_resolve_patch.last_color_base_tiles[rt_index] = color_base_tiles;
+  fsi_resolve_patch.valid = true;
+}
+
+void ResetFsiResolvePatchState() {
+  fsi_resolve_patch = FsiResolvePatchState();
+}
+
+bool ShouldAllowRepeatSceneExportOverwrite(const ResolveInfo& resolve_info) {
+  if (!cvars::resolve_experiment_allow_repeat_full64_overwrite ||
+      resolve_info.IsCopyingDepth() || !resolve_info.copy_dest_extent_length) {
+    return false;
+  }
+  if (!resolve_info.color_edram_info.format_is_64bpp) {
+    return false;
+  }
+  const xenos::TextureFormat dest_texture_format =
+      ColorFormatToTextureFormat(resolve_info.copy_dest_info.copy_dest_format);
+  const FormatInfo& dest_format_info = *FormatInfo::Get(dest_texture_format);
+  if (dest_format_info.bits_per_pixel != 64 ||
+      IsFloatTextureFormat(dest_texture_format)) {
+    return false;
+  }
+  const uint32_t width =
+      resolve_info.coordinate_info.width_div_8
+      << xenos::kResolveAlignmentPixelsLog2;
+  const uint32_t height = resolve_info.height_div_8
+                          << xenos::kResolveAlignmentPixelsLog2;
+  const uint32_t pixel_count = width * height;
+  return pixel_count &&
+         resolve_info.copy_dest_extent_length >= pixel_count * 8;
 }
 
 XE_MSVC_OPTIMIZE_SMALL()
@@ -1501,6 +1529,9 @@ bool GetResolveInfo(const RegisterFile& regs, const Memory& memory,
                                                     .copy_src_select]);
     uint32_t is_64bpp = uint32_t(
         xenos::IsColorRenderTargetFormat64bpp(color_info.color_format));
+    if (cvars::resolve_experiment_edram_64bpp >= 0) {
+      is_64bpp = uint32_t(cvars::resolve_experiment_edram_64bpp);
+    }
     color_edram_info.pitch_tiles = surface_pitch_tiles << is_64bpp;
     color_edram_info.msaa_samples = rb_surface_info.msaa_samples;
     color_edram_info.is_depth = 0;
@@ -1529,17 +1560,64 @@ bool GetResolveInfo(const RegisterFile& regs, const Memory& memory,
     // Applying copy_dest_exp_bias before UNorm packing saturates exports to
     // white - including k_16_16_FLOAT -> k_16_16_16_16 (Spider-Man scene
     // export to 0x05517000). Paired float -> float exports are unaffected.
-    if (cvars::resolve_clear_exp_bias_on_zero &&
-        color_info.color_exp_bias == 0 && exp_bias > 0) {
-      // Only drop stale positive resolve-only bias paired with color_exp_bias 0.
-      // Negative tonemap bias must be kept for float16 -> UNorm exports.
-      exp_bias = 0;
+    int32_t source_color_exp_bias = color_info.color_exp_bias;
+    if (cvars::resolve_experiment_color_exp_bias > -999) {
+      source_color_exp_bias = cvars::resolve_experiment_color_exp_bias;
+    }
+    if (cvars::resolve_clear_exp_bias_on_zero) {
+      if (source_color_exp_bias == 0 && exp_bias > 0) {
+        // Drop stale positive resolve-only bias paired with color_exp_bias 0.
+        exp_bias = 0;
+      }
+      if (IsFloatColorRenderTargetFormat(color_info.color_format) &&
+          !IsFloatTextureFormat(dest_format) && exp_bias > 0) {
+        // Float EDRAM -> fixed export: drop positive resolve-only bias only.
+        exp_bias = 0;
+      }
+      if (exp_bias > 0 && !IsFloatColorRenderTargetFormat(color_info.color_format) &&
+          !IsFloatTextureFormat(dest_format)) {
+        // Fixed EDRAM -> fixed export: stale positive resolve bias saturates
+        // Full-path UNorm output (Spider-Man display resolve).
+        exp_bias = 0;
+      }
+    }
+    if (cvars::resolve_experiment_dest_exp_bias > -999) {
+      exp_bias = cvars::resolve_experiment_dest_exp_bias;
+    }
+    if (cvars::resolve_experiment_edram_format >= 0) {
+      color_edram_info.format =
+          uint32_t(cvars::resolve_experiment_edram_format);
+    }
+    if (cvars::resolve_experiment_edram_base_tiles >= 0) {
+      color_edram_info.base_tiles =
+          uint32_t(cvars::resolve_experiment_edram_base_tiles);
+    }
+    if (cvars::resolve_experiment_edram_pitch_tiles >= 0) {
+      color_edram_info.pitch_tiles =
+          uint32_t(cvars::resolve_experiment_edram_pitch_tiles);
+    }
+    if (cvars::resolve_experiment_edram_msaa >= 0) {
+      color_edram_info.msaa_samples = xenos::MsaaSamples(
+          uint32_t(cvars::resolve_experiment_edram_msaa));
+    }
+    if (cvars::resolve_experiment_edram_fill_half_pixel >= 0) {
+      color_edram_info.fill_half_pixel_offset =
+          uint32_t(cvars::resolve_experiment_edram_fill_half_pixel);
     }
     info_out.color_original_base = color_info.color_base;
   } else {
     info_out.color_original_base = 0;
   }
   info_out.color_edram_info = color_edram_info;
+
+  if (cvars::resolve_experiment_edram_offset_x_div_8 >= 0) {
+    info_out.coordinate_info.edram_offset_x_div_8 = uint32_t(
+        cvars::resolve_experiment_edram_offset_x_div_8);
+  }
+  if (cvars::resolve_experiment_edram_offset_y_div_8 >= 0) {
+    info_out.coordinate_info.edram_offset_y_div_8 = uint32_t(
+        cvars::resolve_experiment_edram_offset_y_div_8);
+  }
 
   // Patch and write RB_COPY_DEST_INFO.
   info_out.copy_dest_info = rb_copy_dest_info;
@@ -1548,6 +1626,27 @@ bool GetResolveInfo(const RegisterFile& regs, const Memory& memory,
   info_out.copy_dest_info.copy_dest_format = xenos::ColorFormat(dest_format);
   // Handle k_16_16 and k_16_16_16_16 range.
   info_out.copy_dest_info.copy_dest_exp_bias = exp_bias;
+  if (cvars::resolve_experiment_dest_format >= 0) {
+    info_out.copy_dest_info.copy_dest_format = xenos::ColorFormat(
+        uint32_t(cvars::resolve_experiment_dest_format));
+  }
+  if (cvars::resolve_experiment_copy_sample_select >= 0) {
+    info_out.copy_dest_coordinate_info.copy_sample_select =
+        xenos::CopySampleSelect(
+            uint32_t(cvars::resolve_experiment_copy_sample_select));
+  }
+  if (cvars::resolve_experiment_dest_offset_x_div_8 >= 0) {
+    info_out.copy_dest_coordinate_info.offset_x_div_8 = uint32_t(
+        cvars::resolve_experiment_dest_offset_x_div_8);
+  }
+  if (cvars::resolve_experiment_dest_offset_y_div_8 >= 0) {
+    info_out.copy_dest_coordinate_info.offset_y_div_8 = uint32_t(
+        cvars::resolve_experiment_dest_offset_y_div_8);
+  }
+  if (cvars::resolve_experiment_copy_dest_swap >= 0) {
+    info_out.copy_dest_info.copy_dest_swap =
+        cvars::resolve_experiment_copy_dest_swap != 0;
+  }
   if (is_depth) {
     // Single component, nothing to swap.
     info_out.copy_dest_info.copy_dest_swap = false;
@@ -1570,7 +1669,10 @@ bool GetResolveInfo(const RegisterFile& regs, const Memory& memory,
       copy_dest_extent_end);
 #endif
   if (!is_depth) {
-    PatchSceneExportResolveInfoInPlace(info_out);
+    PatchFsiResolveEdramBaseInPlace(info_out);
+    if (cvars::resolve_experiment_scene_export_tile_patch) {
+      PatchSceneExportResolveInfoInPlace(info_out);
+    }
   }
   return true;
 }
@@ -1593,27 +1695,40 @@ ResolveCopyShaderIndex ResolveInfo::GetCopyShader(
   const uint32_t pixel_count = width * height;
   const auto dest_texture_format =
       xenos::TextureFormat(copy_dest_info.copy_dest_format);
+  const auto color_rt_format =
+      xenos::ColorRenderTargetFormat(color_edram_info.format);
   // Spider-Man scene export (and similar): GetResolveInfo recomputed destination
   // tiling with 64bpp layout when RB says k_16_16_FLOAT but guest storage is
   // k_16_16_16_16. Force Full 64bpp UNorm packing for float16 EDRAM sources.
-  const auto color_rt_format =
-      xenos::ColorRenderTargetFormat(color_edram_info.format);
   const bool needs_tiled_float16_unorm_export =
-      !is_depth && pixel_count && color_edram_info.format_is_64bpp &&
-      !IsFloatTextureFormat(dest_texture_format) &&
-      dest_format_info.bits_per_pixel == 64 &&
-      (copy_dest_register_vs_storage_bpp_mismatch ||
-       IsFloatColorRenderTargetFormat(color_rt_format) ||
-       color_rt_format == xenos::ColorRenderTargetFormat::k_16_16_16_16);
+      !is_depth && pixel_count && copy_dest_register_vs_storage_bpp_mismatch &&
+      IsFloatColorRenderTargetFormat(color_rt_format) &&
+      !cvars::resolve_experiment_disable_float16_unorm_full;
+  const bool zero_exp_bias_single_sample =
+      !copy_dest_info.copy_dest_exp_bias &&
+      xenos::IsSingleCopySampleSelected(
+          copy_dest_coordinate_info.copy_sample_select);
+  const bool same_storage_bpp_fast_eligible =
+      !is_depth && zero_exp_bias_single_sample &&
+      !needs_tiled_float16_unorm_export &&
+      !(IsFloatColorRenderTargetFormat(color_rt_format) &&
+        !IsFloatTextureFormat(dest_texture_format)) &&
+      ((!source_is_64bpp && dest_format_info.bits_per_pixel == 32) ||
+       (source_is_64bpp && dest_format_info.bits_per_pixel == 64));
   bool use_fast_path =
       is_depth ||
-      (!copy_dest_info.copy_dest_exp_bias &&
-       xenos::IsSingleCopySampleSelected(
-           copy_dest_coordinate_info.copy_sample_select) &&
-       xenos::IsColorResolveFormatBitwiseEquivalent(
-           xenos::ColorRenderTargetFormat(color_edram_info.format),
-           xenos::ColorFormat(copy_dest_info.copy_dest_format)));
-  if (use_fast_path && !is_depth) {
+      (zero_exp_bias_single_sample &&
+       (xenos::IsColorResolveFormatBitwiseEquivalent(
+            xenos::ColorRenderTargetFormat(color_edram_info.format),
+            xenos::ColorFormat(copy_dest_info.copy_dest_format)) ||
+        same_storage_bpp_fast_eligible));
+  if (cvars::resolve_experiment_force_path == 0) {
+    use_fast_path = !is_depth;
+  } else if (cvars::resolve_experiment_force_path == 1) {
+    use_fast_path = false;
+  }
+  if (use_fast_path && !is_depth &&
+      !cvars::resolve_experiment_force_fast_ignore_guards) {
     // Fast copy shaders assume the guest texture storage width matches the fast
     // path output (32 or 64 bpp). Using Fast 32bpp for a 64bpp destination
     // (e.g. float16 EDRAM -> k_16_16_16_16 UNorm scene export) writes at
@@ -1636,6 +1751,10 @@ ResolveCopyShaderIndex ResolveInfo::GetCopyShader(
   uint32_t full_path_bpp = dest_format_info.bits_per_pixel;
   if (needs_tiled_float16_unorm_export) {
     full_path_bpp = 64;
+  }
+  if (cvars::resolve_experiment_dest_bpp == 32 ||
+      cvars::resolve_experiment_dest_bpp == 64) {
+    full_path_bpp = uint32_t(cvars::resolve_experiment_dest_bpp);
   }
   if (use_fast_path) {
     if (edram_info.msaa_samples >= xenos::MsaaSamples::k4X) {
