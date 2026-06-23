@@ -164,9 +164,10 @@ uint XeResolveEdramPixelStrideBytes(XeResolveInfo resolve_info) {
 
 #ifndef XE_RESOLVE_CLEAR
   float XeResolveDestExpBiasFactor(XeResolveInfo resolve_info) {
-    // Host GetResolveInfo clears copy_dest_exp_bias when color_exp_bias is 0;
-    // dest_exp_bias_factor should already be 1.0. Keep this helper as a direct
-    // passthrough so stale push constants cannot re-apply resolve-only bias.
+    // Host GetResolveInfo clears stale positive copy_dest_exp_bias when
+    // color_exp_bias is 0; dest_exp_bias_factor should already be 1.0. Keep this
+    // helper as a direct passthrough so stale push constants cannot re-apply
+    // resolve-only bias.
     return resolve_info.dest_exp_bias_factor;
   }
 

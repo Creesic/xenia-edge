@@ -131,7 +131,9 @@ class RenderTargetCache {
     } else if (format == xenos::ColorRenderTargetFormat::k_2_10_10_10_FLOAT ||
                format == xenos::ColorRenderTargetFormat::
                              k_2_10_10_10_FLOAT_AS_16_16_16_16) {
-      format_flags |= kPSIColorFormatFlag_FixedPointAlpha;
+      // 7e3 RGB is clamped to [0, 31.875] during FSI blending, same as alpha.
+      format_flags |= kPSIColorFormatFlag_FixedPointColor |
+                      kPSIColorFormatFlag_FixedPointAlpha;
     }
     return format_flags;
   }
