@@ -3286,6 +3286,36 @@ bool D3D12CommandProcessor::IssueCopy() {
     result = render_target_cache_->Resolve(*memory_, *shared_memory_,
                                            *texture_cache_, written_address,
                                            written_length);
+    if (result && written_length > 0) {
+      if (cvars::reload_textures_after_resolve) {
+        SubmitBarriers();
+        const uint64_t resolve_submission = GetCurrentSubmission();
+        if (!EndSubmission(false)) {
+          if (debug_markers_enabled_) {
+            PopDebugMarker();
+          }
+          return false;
+        }
+        CheckSubmissionCompletion(resolve_submission);
+        if (!BeginSubmission(true)) {
+          if (debug_markers_enabled_) {
+            PopDebugMarker();
+          }
+          return false;
+        }
+      }
+      texture_cache_->AfterResolveDestinationWritten(written_address,
+                                                     written_length);
+      if (cvars::sync_after_resolve_texture_reload) {
+        SubmitBarriers();
+      }
+      if (cvars::await_gpu_after_resolve) {
+        AwaitAllQueueOperationsCompletion();
+      }
+      if (cvars::end_submission_after_resolve) {
+        EndSubmission(false);
+      }
+    }
   } else {
     result = IssueCopy_ReadbackResolvePath();
   }
@@ -3307,6 +3337,23 @@ bool D3D12CommandProcessor::IssueCopy_ReadbackResolvePath() {
 
   if (!written_length) {
     return true;
+  }
+
+  if (cvars::reload_textures_after_resolve) {
+    SubmitBarriers();
+    if (!AwaitAllQueueOperationsCompletion()) {
+      return false;
+    }
+  }
+  texture_cache_->AfterResolveDestinationWritten(written_address, written_length);
+  if (cvars::sync_after_resolve_texture_reload) {
+    SubmitBarriers();
+  }
+  if (cvars::await_gpu_after_resolve) {
+    AwaitAllQueueOperationsCompletion();
+  }
+  if (cvars::end_submission_after_resolve) {
+    EndSubmission(false);
   }
 
   // Early check: if destination memory is not accessible, skip readback.
@@ -4025,6 +4072,9 @@ bool D3D12CommandProcessor::BeginSubmission(bool is_guest_command) {
 
     primitive_processor_->BeginFrame();
 
+    if (render_target_cache_) {
+      render_target_cache_->BeginFrame();
+    }
     texture_cache_->BeginFrame();
   }
 
@@ -4058,6 +4108,9 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
     texture_cache_->EndFrame();
 
     primitive_processor_->EndFrame();
+    if (render_target_cache_) {
+      render_target_cache_->EndFrame();
+    }
   }
 
   if (submission_open_) {

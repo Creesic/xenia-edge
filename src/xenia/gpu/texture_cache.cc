@@ -295,6 +295,43 @@ void TextureCache::MarkRangeAsResolved(uint32_t start_unscaled,
   // Invalidate textures. Toggling individual textures between scaled and
   // unscaled also relies on invalidation through shared memory.
   shared_memory().RangeWrittenByGpu(start_unscaled, length_unscaled);
+
+  if (cvars::reload_textures_on_mark_resolved) {
+    ReloadTexturesInRange(start_unscaled, length_unscaled);
+  }
+}
+
+void TextureCache::AfterResolveDestinationWritten(uint32_t start_unscaled,
+                                                  uint32_t length_unscaled) {
+  if (length_unscaled == 0) {
+    return;
+  }
+  if (cvars::reload_textures_after_resolve) {
+    ReloadTexturesInRange(start_unscaled, length_unscaled);
+  }
+  if (cvars::invalidate_texture_bindings_after_resolve) {
+    ResetTextureBindings();
+  }
+}
+
+void TextureCache::ReloadTexturesInRange(uint32_t start_unscaled,
+                                         uint32_t length_unscaled) {
+  if (length_unscaled == 0) {
+    return;
+  }
+  start_unscaled &= 0x1FFFFFFF;
+  length_unscaled = std::min(length_unscaled, 0x20000000 - start_unscaled);
+  const uint32_t range_end = start_unscaled + length_unscaled;
+
+  for (const auto& pair : textures_) {
+    Texture& texture = *pair.second;
+    const uint32_t texture_start = texture.key().base_page << 12;
+    const uint32_t texture_end = texture_start + texture.GetGuestBaseSize();
+    if (texture_start >= range_end || texture_end <= start_unscaled) {
+      continue;
+    }
+    LoadTextureData(texture);
+  }
 }
 
 uint32_t TextureCache::GuestToHostSwizzle(uint32_t guest_swizzle,

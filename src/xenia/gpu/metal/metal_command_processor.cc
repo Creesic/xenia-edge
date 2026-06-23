@@ -1762,6 +1762,9 @@ void MetalCommandProcessor::IssueSwap(uint32_t frontbuffer_ptr,
 
   if (primitive_processor_ && frame_open_) {
     primitive_processor_->EndFrame();
+    if (render_target_cache_) {
+      render_target_cache_->EndFrame();
+    }
     frame_open_ = false;
   }
   // Frame boundary reached - resolved memory tracking is only needed within a
@@ -3621,6 +3624,18 @@ bool MetalCommandProcessor::IssueCopy() {
                                      copy_command_buffer)) {
     XELOGE("MetalCommandProcessor::IssueCopy - Resolve failed");
     return false;
+  }
+
+  if (written_length > 0) {
+    if (cvars::reload_textures_after_resolve) {
+      copy_command_buffer->commit();
+      copy_command_buffer->waitUntilCompleted();
+    }
+    texture_cache()->AfterResolveDestinationWritten(written_address,
+                                                    written_length);
+    if (cvars::await_gpu_after_resolve) {
+      PrepareForWait();
+    }
   }
 
   ReadbackResolveMode readback_mode = GetReadbackResolveMode();

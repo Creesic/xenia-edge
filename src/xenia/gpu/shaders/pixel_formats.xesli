@@ -394,6 +394,20 @@ float4_xe XeUnpackR16G16B16A16Edram(uint2_xe p) {
                  (32.0f / 32767.0f));
 }
 
+// Inverse of PackFloat16x2ExtendedRange in spirv_shader_translator_rb.cc.
+// Exponent 31 lanes are large finite values on the Xbox 360, not Inf/NaN.
+float2_xe XeUnpackFloat16x2Extended(uint packed) {
+  uint lo = packed & 0xFFFFu;
+  uint hi = packed >> 16u;
+  float2_xe standard = unpack_half_2x16_xe(packed);
+  bool lo_overflow = (lo & 0x7C00u) == 0x7C00u;
+  bool hi_overflow = (hi & 0x7C00u) == 0x7C00u;
+  float extended_x = unpack_half_2x16_xe(lo - 0x0400u).x * 2.0f;
+  float extended_y = unpack_half_2x16_xe(hi - 0x0400u).x * 2.0f;
+  return float2_xe(select_xe(lo_overflow, extended_x, standard.x),
+                   select_xe(hi_overflow, extended_y, standard.y));
+}
+
 // Xenos 16-bit packed textures are RGBA, but in Direct3D 12 they are BGRA.
 
 uint4_xe XeR5G5B5A1ToB5G5R5A1(uint4_xe packed_texels) {

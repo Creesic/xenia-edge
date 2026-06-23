@@ -1747,7 +1747,7 @@ void VulkanCommandProcessor::IssueSwap(uint32_t frontbuffer_ptr,
           static uint32_t gamma_log_count = 0;
           if (gamma_log_count < 4) {
             ++gamma_log_count;
-            const uint32_t* table = gamma_ramp_256_entry_table();
+            const reg::DC_LUT_30_COLOR* table = gamma_ramp_256_entry_table();
             const reg::DC_LUT_PWL_DATA* pwl = gamma_ramp_pwl_rgb();
             XELOGI(
                 "GammaDump #{} fb_format={} use_pwl={} "
@@ -1755,9 +1755,10 @@ void VulkanCommandProcessor::IssueSwap(uint32_t frontbuffer_ptr,
                 "pwl_r[0].base={} .delta={} pwl_r[63].base={} .delta={} "
                 "pwl_g[0].base={} pwl_b[0].base={}",
                 gamma_log_count, uint32_t(frontbuffer_format),
-                uint32_t(use_pwl_gamma_ramp), table[0], table[64], table[128],
-                table[192], table[255], pwl[0].base, pwl[0].delta,
-                pwl[63].base, pwl[63].delta, pwl[128].base, pwl[256].base);
+                uint32_t(use_pwl_gamma_ramp), table[0].value, table[64].value,
+                table[128].value, table[192].value, table[255].value,
+                pwl[0].base, pwl[0].delta, pwl[63].base, pwl[63].delta,
+                pwl[128].base, pwl[256].base);
           }
         }
 
@@ -3987,6 +3988,43 @@ bool VulkanCommandProcessor::IssueCopy() {
   }
   ++submission_in_progress_.resolve_count;
 
+  if (written_length > 0) {
+    if (cvars::reload_textures_after_resolve) {
+      SubmitBarriers(true);
+      const uint64_t resolve_submission = GetCurrentSubmission();
+      if (!EndSubmission(false)) {
+        if (debug_markers_enabled_) {
+          PopDebugMarker();
+        }
+        return false;
+      }
+      CheckSubmissionCompletionAndDeviceLoss(resolve_submission);
+      if (device_lost_) {
+        if (debug_markers_enabled_) {
+          PopDebugMarker();
+        }
+        return false;
+      }
+      if (!BeginSubmission(true)) {
+        if (debug_markers_enabled_) {
+          PopDebugMarker();
+        }
+        return false;
+      }
+    }
+    texture_cache_->AfterResolveDestinationWritten(written_address,
+                                                   written_length);
+    if (cvars::sync_after_resolve_texture_reload) {
+      SubmitBarriers(true);
+    }
+    if (cvars::await_gpu_after_resolve) {
+      AwaitAllQueueOperationsCompletion();
+    }
+    if (cvars::end_submission_after_resolve) {
+      EndSubmission(false);
+    }
+  }
+
   // CPU readback resolve path (if not disabled).
   ReadbackResolveMode readback_mode = GetReadbackResolveMode();
   if (readback_mode != ReadbackResolveMode::kDisabled &&
@@ -5561,6 +5599,9 @@ bool VulkanCommandProcessor::BeginSubmission(bool is_guest_command) {
 
     primitive_processor_->BeginFrame();
 
+    if (render_target_cache_) {
+      render_target_cache_->BeginFrame();
+    }
     texture_cache_->BeginFrame();
   }
 
@@ -5627,6 +5668,9 @@ bool VulkanCommandProcessor::EndSubmission(bool is_swap) {
 
   if (is_closing_frame) {
     primitive_processor_->EndFrame();
+    if (render_target_cache_) {
+      render_target_cache_->EndFrame();
+    }
   }
 
   if (submission_open_) {
@@ -6960,32 +7004,6 @@ bool VulkanCommandProcessor::UpdateBindings(const VulkanShader* vertex_shader,
       buffer_info.range = VkDeviceSize(kFetchConstantsSize);
       std::memcpy(mapping, &regs[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0],
                   kFetchConstantsSize);
-      // TEMP_FETCH_DUMP: Log non-zero texture fetch constants to identify
-      // num_format and exp_adjust values for each texture slot.
-      // Remove once root cause is identified.
-      if (kernel_state_ && kernel_state_->title_id() == 0x415608B2) {
-        static uint32_t fetch_dump_count = 0;
-        if (fetch_dump_count < 2048) {
-          const xenos::xe_gpu_texture_fetch_t* fetches =
-              reinterpret_cast<const xenos::xe_gpu_texture_fetch_t*>(
-                  &regs[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0]);
-          for (uint32_t i = 0; i < xenos::kTextureFetchConstantCount; ++i) {
-            const auto& f = fetches[i];
-            if (f.type != xenos::FetchConstantType::kTexture || !f.dword_3) {
-              continue;
-            }
-            ++fetch_dump_count;
-            XELOGI(
-                "FetchDump slot={} dword3=0x{:08X} format={} num_format={} "
-                "exp_adjust={} sign={}/{}/{}/{} base=0x{:08X} size={}x{}",
-                i, f.dword_3, uint32_t(f.format), uint32_t(f.num_format),
-                int32_t(f.exp_adjust), uint32_t(f.sign_x), uint32_t(f.sign_y),
-                uint32_t(f.sign_z), uint32_t(f.sign_w),
-                f.base_address << 12, f.size_2d.width + 1,
-                f.size_2d.height + 1);
-          }
-        }
-      }
       current_constant_buffers_up_to_date_ |=
           UINT32_C(1) << SpirvShaderTranslator::kConstantBufferFetch;
     }

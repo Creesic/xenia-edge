@@ -163,6 +163,13 @@ uint XeResolveEdramPixelStrideBytes(XeResolveInfo resolve_info) {
 }
 
 #ifndef XE_RESOLVE_CLEAR
+  float XeResolveDestExpBiasFactor(XeResolveInfo resolve_info) {
+    // Host GetResolveInfo clears copy_dest_exp_bias when color_exp_bias is 0;
+    // dest_exp_bias_factor should already be 1.0. Keep this helper as a direct
+    // passthrough so stale push constants cannot re-apply resolve-only bias.
+    return resolve_info.dest_exp_bias_factor;
+  }
+
   uint XeResolveDestPixelAddress(const XeResolveInfo resolve_info,
                                  uint2_xe host_position,
                                  const uint bytes_per_block_log2) {
@@ -269,8 +276,8 @@ uint XeResolveEdramPixelStrideBytes(XeResolveInfo resolve_info) {
         sample_1 = float4_xe(XeUnpackR16G16Edram(packed.y), 0.0f, 0.0f);
         break;
       case kXenosColorRenderTargetFormat_16_16_FLOAT:
-        sample_0 = float4_xe(unpack_half_2x16_xe(packed.x), 0.0f, 0.0f);
-        sample_1 = float4_xe(unpack_half_2x16_xe(packed.y), 0.0f, 0.0f);
+        sample_0 = float4_xe(XeUnpackFloat16x2Extended(packed.x), 0.0f, 0.0f);
+        sample_1 = float4_xe(XeUnpackFloat16x2Extended(packed.y), 0.0f, 0.0f);
         break;
       default:
         // Treat as 32_FLOAT.
@@ -313,10 +320,10 @@ uint XeResolveEdramPixelStrideBytes(XeResolveInfo resolve_info) {
         sample_3 = float4_xe(XeUnpackR16G16Edram(packed.w), 0.0f, 0.0f);
         break;
       case kXenosColorRenderTargetFormat_16_16_FLOAT:
-        sample_0 = float4_xe(unpack_half_2x16_xe(packed.x), 0.0f, 0.0f);
-        sample_1 = float4_xe(unpack_half_2x16_xe(packed.y), 0.0f, 0.0f);
-        sample_2 = float4_xe(unpack_half_2x16_xe(packed.z), 0.0f, 0.0f);
-        sample_3 = float4_xe(unpack_half_2x16_xe(packed.w), 0.0f, 0.0f);
+        sample_0 = float4_xe(XeUnpackFloat16x2Extended(packed.x), 0.0f, 0.0f);
+        sample_1 = float4_xe(XeUnpackFloat16x2Extended(packed.y), 0.0f, 0.0f);
+        sample_2 = float4_xe(XeUnpackFloat16x2Extended(packed.z), 0.0f, 0.0f);
+        sample_3 = float4_xe(XeUnpackFloat16x2Extended(packed.w), 0.0f, 0.0f);
         break;
       default:
         // Treat as 32_FLOAT.
@@ -356,14 +363,14 @@ uint XeResolveEdramPixelStrideBytes(XeResolveInfo resolve_info) {
         samples_4567 = XeUnpackR16EdramX4(packed_4567);
         break;
       case kXenosColorRenderTargetFormat_16_16_FLOAT:
-        samples_0123.x = unpack_half_2x16_xe(packed_0123.x).x;
-        samples_0123.y = unpack_half_2x16_xe(packed_0123.y).x;
-        samples_0123.z = unpack_half_2x16_xe(packed_0123.z).x;
-        samples_0123.w = unpack_half_2x16_xe(packed_0123.w).x;
-        samples_4567.x = unpack_half_2x16_xe(packed_4567.x).x;
-        samples_4567.y = unpack_half_2x16_xe(packed_4567.y).x;
-        samples_4567.z = unpack_half_2x16_xe(packed_4567.z).x;
-        samples_4567.w = unpack_half_2x16_xe(packed_4567.w).x;
+        samples_0123.x = XeUnpackFloat16x2Extended(packed_0123.x).x;
+        samples_0123.y = XeUnpackFloat16x2Extended(packed_0123.y).x;
+        samples_0123.z = XeUnpackFloat16x2Extended(packed_0123.z).x;
+        samples_0123.w = XeUnpackFloat16x2Extended(packed_0123.w).x;
+        samples_4567.x = XeUnpackFloat16x2Extended(packed_4567.x).x;
+        samples_4567.y = XeUnpackFloat16x2Extended(packed_4567.y).x;
+        samples_4567.z = XeUnpackFloat16x2Extended(packed_4567.z).x;
+        samples_4567.w = XeUnpackFloat16x2Extended(packed_4567.w).x;
         break;
       default:
         // Treat as 32_FLOAT.
@@ -382,10 +389,10 @@ uint XeResolveEdramPixelStrideBytes(XeResolveInfo resolve_info) {
         sample_1 = XeUnpackR16G16B16A16Edram(packed.zw);
         break;
       case kXenosColorRenderTargetFormat_16_16_16_16_FLOAT:
-        sample_0.xy = unpack_half_2x16_xe(packed.x);
-        sample_0.zw = unpack_half_2x16_xe(packed.y);
-        sample_1.xy = unpack_half_2x16_xe(packed.z);
-        sample_1.zw = unpack_half_2x16_xe(packed.w);
+        sample_0.xy = XeUnpackFloat16x2Extended(packed.x);
+        sample_0.zw = XeUnpackFloat16x2Extended(packed.y);
+        sample_1.xy = XeUnpackFloat16x2Extended(packed.z);
+        sample_1.zw = XeUnpackFloat16x2Extended(packed.w);
         break;
       default:
         // Treat as 32_32_FLOAT.
@@ -407,14 +414,14 @@ uint XeResolveEdramPixelStrideBytes(XeResolveInfo resolve_info) {
         sample_3 = XeUnpackR16G16B16A16Edram(packed_23.zw);
         break;
       case kXenosColorRenderTargetFormat_16_16_16_16_FLOAT:
-        sample_0.xy = unpack_half_2x16_xe(packed_01.x);
-        sample_0.zw = unpack_half_2x16_xe(packed_01.y);
-        sample_1.xy = unpack_half_2x16_xe(packed_01.z);
-        sample_1.zw = unpack_half_2x16_xe(packed_01.w);
-        sample_2.xy = unpack_half_2x16_xe(packed_23.x);
-        sample_2.zw = unpack_half_2x16_xe(packed_23.y);
-        sample_3.xy = unpack_half_2x16_xe(packed_23.z);
-        sample_3.zw = unpack_half_2x16_xe(packed_23.w);
+        sample_0.xy = XeUnpackFloat16x2Extended(packed_01.x);
+        sample_0.zw = XeUnpackFloat16x2Extended(packed_01.y);
+        sample_1.xy = XeUnpackFloat16x2Extended(packed_01.z);
+        sample_1.zw = XeUnpackFloat16x2Extended(packed_01.w);
+        sample_2.xy = XeUnpackFloat16x2Extended(packed_23.x);
+        sample_2.zw = XeUnpackFloat16x2Extended(packed_23.y);
+        sample_3.xy = XeUnpackFloat16x2Extended(packed_23.z);
+        sample_3.zw = XeUnpackFloat16x2Extended(packed_23.w);
         break;
       default:
         // Treat as 32_32_FLOAT.
@@ -436,14 +443,14 @@ uint XeResolveEdramPixelStrideBytes(XeResolveInfo resolve_info) {
         samples_4567 = XeUnpackR16EdramX4(packed_4567);
         break;
       case kXenosColorRenderTargetFormat_16_16_16_16_FLOAT:
-        samples_0123.x = unpack_half_2x16_xe(packed_0123.x).x;
-        samples_0123.y = unpack_half_2x16_xe(packed_0123.y).x;
-        samples_0123.z = unpack_half_2x16_xe(packed_0123.z).x;
-        samples_0123.w = unpack_half_2x16_xe(packed_0123.w).x;
-        samples_4567.x = unpack_half_2x16_xe(packed_4567.x).x;
-        samples_4567.y = unpack_half_2x16_xe(packed_4567.y).x;
-        samples_4567.z = unpack_half_2x16_xe(packed_4567.z).x;
-        samples_4567.w = unpack_half_2x16_xe(packed_4567.w).x;
+        samples_0123.x = XeUnpackFloat16x2Extended(packed_0123.x).x;
+        samples_0123.y = XeUnpackFloat16x2Extended(packed_0123.y).x;
+        samples_0123.z = XeUnpackFloat16x2Extended(packed_0123.z).x;
+        samples_0123.w = XeUnpackFloat16x2Extended(packed_0123.w).x;
+        samples_4567.x = XeUnpackFloat16x2Extended(packed_4567.x).x;
+        samples_4567.y = XeUnpackFloat16x2Extended(packed_4567.y).x;
+        samples_4567.z = XeUnpackFloat16x2Extended(packed_4567.z).x;
+        samples_4567.w = XeUnpackFloat16x2Extended(packed_4567.w).x;
         break;
       default:
         // Treat as 32_32_FLOAT.
@@ -582,7 +589,7 @@ uint XeResolveEdramPixelStrideBytes(XeResolveInfo resolve_info) {
           address_bytes, pixel_stride_bytes,
           resolve_info.edram_format_ints_log2, resolve_info.edram_format,
           pixel_0, pixel_1);
-      float exp_bias = resolve_info.dest_exp_bias_factor;
+      float exp_bias = XeResolveDestExpBiasFactor(resolve_info);
       dont_flatten_xe
       if (resolve_info.sample_select >= kXenosCopySampleSelect_01) {
         uint tile_row_stride_bytes = 4u * 80u * resolve_info.resolution_scale.x;
@@ -652,7 +659,7 @@ uint XeResolveEdramPixelStrideBytes(XeResolveInfo resolve_info) {
           address_bytes, pixel_stride_bytes,
           resolve_info.edram_format_ints_log2, resolve_info.edram_format,
           pixel_0, pixel_1, pixel_2, pixel_3);
-      float exp_bias = resolve_info.dest_exp_bias_factor;
+      float exp_bias = XeResolveDestExpBiasFactor(resolve_info);
       dont_flatten_xe
       if (resolve_info.sample_select >= kXenosCopySampleSelect_01) {
         uint tile_row_stride_bytes = 4u * 80u * resolve_info.resolution_scale.x;
@@ -743,7 +750,7 @@ uint XeResolveEdramPixelStrideBytes(XeResolveInfo resolve_info) {
           address_bytes, pixel_stride_bytes,
           resolve_info.edram_format_ints_log2, resolve_info.edram_format,
           resolve_info.dest_swap, pixels_0123, pixels_4567);
-      float exp_bias = resolve_info.dest_exp_bias_factor;
+      float exp_bias = XeResolveDestExpBiasFactor(resolve_info);
       dont_flatten_xe
       if (resolve_info.sample_select >= kXenosCopySampleSelect_01) {
         uint tile_row_stride_bytes = 4u * 80u * resolve_info.resolution_scale.x;

@@ -72,6 +72,10 @@ class ImGuiDebugDialog : public ImGuiGamepadDialog {
   void ApplyLogMask();
   void ApplyScribbleHeapValue();
 
+  void DrawGpuSceneExportTestPresets();
+  void ApplyGpuSceneExportTestPresetAt(size_t index);
+  void StepGpuSceneExportTestPreset(int delta);
+
   app::EmulatorWindow* emulator_window_;
   std::function<void()> on_close_callback_;
 
@@ -90,6 +94,9 @@ class ImGuiDebugDialog : public ImGuiGamepadDialog {
   // Resolution Scaling / Resolve
   bool draw_resolution_scaled_texture_offsets_;
   bool readback_resolve_half_pixel_offset_;
+  bool reload_textures_after_resolve_;
+  bool resolve_clear_exp_bias_on_zero_;
+  bool gamma_render_target_as_unorm16_;
   bool resolve_resolution_scale_fill_half_pixel_offset_;
   // Shader / Driver Workarounds
   bool use_fuzzy_alpha_epsilon_;
@@ -128,6 +135,8 @@ class ImGuiDebugDialog : public ImGuiGamepadDialog {
   char log_level_buffer_[32] = {};
   char log_mask_buffer_[32] = {};
   char scribble_heap_value_buffer_[32] = {};
+
+  size_t gpu_scene_export_test_index_ = 0;
 };
 
 }  // namespace ui

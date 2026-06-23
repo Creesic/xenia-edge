@@ -15,6 +15,7 @@
 #include <functional>
 #include <map>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -192,6 +193,8 @@ class RenderTargetCache {
   virtual void ClearCache();
 
   virtual void BeginFrame();
+
+  virtual void EndFrame();
 
   virtual bool Update(bool is_rasterization_done,
                       reg::RB_DEPTHCONTROL normalized_depth_control,
@@ -591,6 +594,24 @@ class RenderTargetCache {
 
   virtual void RequestPixelShaderInterlockBarrier() {}
 
+  enum class ResolveCopyDestFrameState {
+    kNone,
+    kFirstExport,
+    kRepeatExport,
+  };
+
+  // Guest texture identity for repeat-export tracking (base + byte length).
+  static uint64_t GetResolveCopyDestKey(
+      const draw_util::ResolveInfo& resolve_info);
+
+  // Tracks whether this guest copy destination was already exported this frame.
+  ResolveCopyDestFrameState GetResolveCopyDestFrameState(
+      const draw_util::ResolveInfo& resolve_info);
+
+  // When skip_repeat_resolve_to_same_dest is enabled, returns true if the copy
+  // should be skipped because this guest destination was already exported.
+  bool CheckResolveCopyDestRepeat(const draw_util::ResolveInfo& resolve_info);
+
   // To be called by the implementation when interlocked writes to all of the
   // EDRAM memory are committed with a memory barrier.
   void PixelShaderInterlockFullEdramBarrierPlaced();
@@ -743,6 +764,8 @@ class RenderTargetCache {
   // consecutive in the array.
   std::vector<Transfer>
       last_update_transfers_[1 + xenos::kMaxColorRenderTargets];
+
+  std::unordered_set<uint64_t> resolve_copy_dests_this_frame_;
 };
 
 }  // namespace gpu

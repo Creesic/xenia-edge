@@ -1318,13 +1318,20 @@ bool D3D12RenderTargetCache::Resolve(const Memory& memory,
   // Copying.
   bool copied = false;
   if (resolve_info.copy_dest_extent_length) {
+    const ResolveCopyDestFrameState copy_dest_state =
+        GetResolveCopyDestFrameState(resolve_info);
+    const bool copy_dest_is_repeat =
+        copy_dest_state == ResolveCopyDestFrameState::kRepeatExport;
     if (command_processor_.debug_markers_enabled()) {
       char label[draw_util::kDebugMarkerLabelMaxLength];
       draw_util::FormatResolveCopyDebugMarker(label, sizeof(label),
                                               resolve_info);
       command_processor_.PushDebugMarker("%s", label);
     }
-    if (GetPath() == Path::kHostRenderTargets) {
+    if (copy_dest_is_repeat &&
+        cvars::skip_repeat_resolve_to_same_dest) {
+      copied = true;
+    } else if (GetPath() == Path::kHostRenderTargets) {
       // Dump the current contents of the render targets owning the affected
       // range to edram_buffer_.
       // TODO(Triang3l): Direct host render target -> shared memory resolve
@@ -1338,6 +1345,7 @@ bool D3D12RenderTargetCache::Resolve(const Memory& memory,
       DumpRenderTargets(dump_base, dump_row_length_used, dump_rows, dump_pitch);
     }
 
+    if (!copied) {
     draw_util::ResolveCopyShaderConstants copy_shader_constants;
     uint32_t copy_group_count_x, copy_group_count_y;
     draw_util::ResolveCopyShaderIndex copy_shader = resolve_info.GetCopyShader(
@@ -1409,16 +1417,19 @@ bool D3D12RenderTargetCache::Resolve(const Memory& memory,
         }
 
         // Invalidate textures and mark the range as scaled if needed.
-        texture_cache.MarkRangeAsResolved(resolve_info.copy_dest_extent_start,
-                                          resolve_info.copy_dest_extent_length);
-        written_address_out = resolve_info.copy_dest_extent_start;
-        written_length_out = resolve_info.copy_dest_extent_length;
+        if (!copy_dest_is_repeat) {
+          texture_cache.MarkRangeAsResolved(resolve_info.copy_dest_extent_start,
+                                            resolve_info.copy_dest_extent_length);
+          written_address_out = resolve_info.copy_dest_extent_start;
+          written_length_out = resolve_info.copy_dest_extent_length;
+        }
         copied = true;
       } else {
         XELOGE(
             "D3D12RenderTargetCache: Failed to obtain the resolve destination "
             "memory region");
       }
+    }
     }
     command_processor_.PopDebugMarker();
   } else {

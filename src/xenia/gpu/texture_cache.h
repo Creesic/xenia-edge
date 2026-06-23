@@ -98,6 +98,13 @@ class TextureCache {
   virtual void BeginFrame();
 
   void MarkRangeAsResolved(uint32_t start_unscaled, uint32_t length_unscaled);
+  // Upload resolve destination data to any cached GPU textures immediately.
+  // Resolve writes guest memory on the GPU, but texture loads are normally
+  // deferred until a draw binds the texture. Reloading here ensures any draw
+  // issued before the next explicit texture request sees resolved data.
+  void ReloadTexturesInRange(uint32_t start_unscaled, uint32_t length_unscaled);
+  void AfterResolveDestinationWritten(uint32_t start_unscaled,
+                                    uint32_t length_unscaled);
   // Ensures the memory backing the range in the scaled resolve address space is
   // allocated and returns whether it is.
   virtual bool EnsureScaledResolveMemoryCommitted(

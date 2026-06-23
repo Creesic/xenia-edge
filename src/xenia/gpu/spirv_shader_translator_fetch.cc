@@ -1657,20 +1657,21 @@ void SpirvShaderTranslator::ProcessTextureFetchInstruction(
         spv::Id is_any_unsigned = builder_->createUnaryOp(
             spv::OpLogicalNot, type_bool_, is_all_signed);
 
-        // Load the fetch constant word 3, needed for result exponent biasing.
-        // exp_adjust is in word 3, bits 13:18 (6-bit signed).
+        // Load fetch constant word 3: num_format (bit 0), swizzle (bits 1:12),
+        // exp_adjust (bits 13:18, signed).
         id_vector_temp_.clear();
         id_vector_temp_.push_back(const_int_0_);
         id_vector_temp_.push_back(builder_->makeIntConstant(
             int((fetch_constant_word_0_index + 3) >> 2)));
         id_vector_temp_.push_back(builder_->makeIntConstant(
             int((fetch_constant_word_0_index + 3) & 3)));
-        spv::Id fetch_constant_word_3_signed = builder_->createUnaryOp(
-            spv::OpBitcast, type_int_,
+        spv::Id fetch_constant_word_3 =
             builder_->createLoad(builder_->createAccessChain(
                                      spv::StorageClassUniform,
                                      uniform_fetch_constants_, id_vector_temp_),
-                                 spv::NoPrecision));
+                                 spv::NoPrecision);
+        spv::Id fetch_constant_word_3_signed = builder_->createUnaryOp(
+            spv::OpBitcast, type_int_, fetch_constant_word_3);
 
         // Load the fetch constant word 4, needed unconditionally for LOD
         // biasing, and conditionally for stacked texture filtering.
@@ -2422,7 +2423,7 @@ void SpirvShaderTranslator::ProcessTextureFetchInstruction(
             result_remaining_components &=
                 ~(UINT32_C(1) << result_component_index);
             spv::Id swizzle_component = builder_->createTriOp(
-                spv::OpBitFieldUExtract, type_uint_, fetch_constant_word_3_signed,
+                spv::OpBitFieldUExtract, type_uint_, fetch_constant_word_3,
                 builder_->makeUintConstant(1 + 3 * result_component_index),
                 builder_->makeUintConstant(3));
             spv::Id swizzle_component_is_texture = builder_->createBinOp(

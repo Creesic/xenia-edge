@@ -66,6 +66,22 @@ DECLARE_bool(async_shader_compilation);
 
 DECLARE_bool(readback_resolve_half_pixel_offset);
 
+DECLARE_bool(reload_textures_after_resolve);
+
+DECLARE_bool(reload_textures_on_mark_resolved);
+
+DECLARE_bool(sync_after_resolve_texture_reload);
+
+DECLARE_bool(await_gpu_after_resolve);
+
+DECLARE_bool(invalidate_texture_bindings_after_resolve);
+
+DECLARE_bool(end_submission_after_resolve);
+
+DECLARE_bool(skip_repeat_resolve_to_same_dest);
+
+DECLARE_bool(resolve_clear_exp_bias_on_zero);
+
 DECLARE_bool(gpu_3d_to_2d_texture);
 
 DECLARE_bool(ac6_ground_fix);

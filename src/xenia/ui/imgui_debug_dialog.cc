@@ -7,6 +7,7 @@
  ******************************************************************************
  */
 
+#include "xenia/ui/gpu_scene_export_test_presets.h"
 #include "xenia/ui/imgui_debug_dialog.h"
 
 #include <cerrno>
@@ -41,6 +42,9 @@ DECLARE_string(occlusion_query);
 DECLARE_bool(present_letterbox);
 DECLARE_bool(draw_resolution_scaled_texture_offsets);
 DECLARE_bool(readback_resolve_half_pixel_offset);
+DECLARE_bool(reload_textures_after_resolve);
+DECLARE_bool(resolve_clear_exp_bias_on_zero);
+DECLARE_bool(gamma_render_target_as_unorm16);
 DECLARE_bool(resolve_resolution_scale_fill_half_pixel_offset);
 DECLARE_bool(use_fuzzy_alpha_epsilon);
 DECLARE_bool(precise_interpolation);
@@ -299,6 +303,9 @@ void ImGuiDebugDialog::LoadCurrentSettings() {
       cvars::draw_resolution_scaled_texture_offsets;
   readback_resolve_half_pixel_offset_ =
       cvars::readback_resolve_half_pixel_offset;
+  reload_textures_after_resolve_ = cvars::reload_textures_after_resolve;
+  resolve_clear_exp_bias_on_zero_ = cvars::resolve_clear_exp_bias_on_zero;
+  gamma_render_target_as_unorm16_ = cvars::gamma_render_target_as_unorm16;
   resolve_resolution_scale_fill_half_pixel_offset_ =
       cvars::resolve_resolution_scale_fill_half_pixel_offset;
 
@@ -558,6 +565,74 @@ void ImGuiDebugDialog::ApplyScribbleHeapValue() {
   SyncTextBuffers();
 }
 
+void ImGuiDebugDialog::ApplyGpuSceneExportTestPresetAt(size_t index) {
+  Emulator* emulator =
+      emulator_window_ != nullptr ? emulator_window_->emulator() : nullptr;
+  GpuSceneExportTestApplyResult result =
+      ApplyGpuSceneExportTestPreset(index, emulator);
+  if (!result.success) {
+    ShowNotification("GPU scene test", "Failed to apply preset");
+    return;
+  }
+  gpu_scene_export_test_index_ = index;
+  LoadCurrentSettings();
+  ShowNotification(result.title, result.detail);
+}
+
+void ImGuiDebugDialog::StepGpuSceneExportTestPreset(int delta) {
+  const size_t count = GetGpuSceneExportTestPresetCount();
+  if (!count) {
+    return;
+  }
+  int next = static_cast<int>(gpu_scene_export_test_index_) + delta;
+  while (next < 0) {
+    next += static_cast<int>(count);
+  }
+  next %= static_cast<int>(count);
+  ApplyGpuSceneExportTestPresetAt(static_cast<size_t>(next));
+}
+
+void ImGuiDebugDialog::DrawGpuSceneExportTestPresets() {
+  const size_t count = GetGpuSceneExportTestPresetCount();
+  if (!count) {
+    return;
+  }
+  if (gpu_scene_export_test_index_ >= count) {
+    gpu_scene_export_test_index_ = 0;
+  }
+
+  const GpuSceneExportTestPreset& preset =
+      GetGpuSceneExportTestPreset(gpu_scene_export_test_index_);
+
+  ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.063f, 0.486f, 0.063f, 1.0f));
+  ImGui::TextUnformatted("GPU Scene Export Tests");
+  ImGui::PopStyleColor();
+
+  ImGui::Text("Test %zu / %zu", gpu_scene_export_test_index_ + 1, count);
+  ImGui::TextWrapped("%s", preset.name);
+  ImGui::Spacing();
+  ImGui::TextWrapped("%s", preset.summary);
+  ImGui::Spacing();
+
+  const float button_width =
+      (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) *
+      0.5f;
+  if (ImGui::Button("Previous Test", ImVec2(button_width, 0))) {
+    StepGpuSceneExportTestPreset(-1);
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Next Test", ImVec2(button_width, 0))) {
+    StepGpuSceneExportTestPreset(1);
+  }
+
+  if (ImGui::Button("Apply This Test Again", ImVec2(-1.0f, 0))) {
+    ApplyGpuSceneExportTestPresetAt(gpu_scene_export_test_index_);
+  }
+
+  ImGui::TextDisabled(
+      "[ and ] or PageUp/PageDown to step while this window is open");
+}
+
 void ImGuiDebugDialog::OnDraw(ImGuiIO& io) {
   // Style - white background, black text, Xbox green accents
   const ImVec4 xbox_green(0.063f, 0.486f, 0.063f, 1.0f);
@@ -578,7 +653,7 @@ void ImGuiDebugDialog::OnDraw(ImGuiIO& io) {
   // Center on screen
   ImVec2 center = ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f);
   ImGui::SetNextWindowPos(center, ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
-  ImGui::SetNextWindowSize(ImVec2(450.0f, 500.0f), ImGuiCond_FirstUseEver);
+  ImGui::SetNextWindowSize(ImVec2(480.0f, 580.0f), ImGuiCond_FirstUseEver);
 
   const char* anisotropic_labels[] = {"Auto (-1)", "Off (0)", "1x", "2x",
                                       "4x",        "8x",      "16x"};
@@ -623,6 +698,9 @@ void ImGuiDebugDialog::OnDraw(ImGuiIO& io) {
   bool show_scaling = AnyMatchesFilter({
       "draw_resolution_scaled_texture_offsets",
       "readback_resolve_half_pixel_offset",
+      "reload_textures_after_resolve",
+      "resolve_clear_exp_bias_on_zero",
+      "gamma_render_target_as_unorm16",
       "resolve_resolution_scale_fill_half_pixel_offset",
   });
   bool show_shader = AnyMatchesFilter({
@@ -672,6 +750,19 @@ void ImGuiDebugDialog::OnDraw(ImGuiIO& io) {
         ImGui::IsKeyPressed(ImGuiKey_F8) || ShouldCloseFromGamepad()) {
       Close();
     }
+    if (ImGui::IsKeyPressed(ImGuiKey_LeftBracket) ||
+        ImGui::IsKeyPressed(ImGuiKey_PageUp)) {
+      StepGpuSceneExportTestPreset(-1);
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_RightBracket) ||
+        ImGui::IsKeyPressed(ImGuiKey_PageDown)) {
+      StepGpuSceneExportTestPreset(1);
+    }
+
+    DrawGpuSceneExportTestPresets();
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
 
     ImGui::TextUnformatted("Filter:");
     ImGui::SameLine();
@@ -863,6 +954,42 @@ void ImGuiDebugDialog::OnDraw(ImGuiIO& io) {
                                      &readback_resolve_half_pixel_offset_)) {
               ApplyBoolSetting("GPU", "readback_resolve_half_pixel_offset",
                                readback_resolve_half_pixel_offset_);
+            }
+          }
+
+          if (MatchesFilter("reload_textures_after_resolve")) {
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            DrawLabelCell("reload_textures_after_resolve");
+            ImGui::TableSetColumnIndex(1);
+            if (RightAlignedCheckbox("##reload_textures_after_resolve",
+                                     &reload_textures_after_resolve_)) {
+              ApplyBoolSetting("GPU", "reload_textures_after_resolve",
+                               reload_textures_after_resolve_, true);
+            }
+          }
+
+          if (MatchesFilter("resolve_clear_exp_bias_on_zero")) {
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            DrawLabelCell("resolve_clear_exp_bias_on_zero");
+            ImGui::TableSetColumnIndex(1);
+            if (RightAlignedCheckbox("##resolve_clear_exp_bias_on_zero",
+                                     &resolve_clear_exp_bias_on_zero_)) {
+              ApplyBoolSetting("GPU", "resolve_clear_exp_bias_on_zero",
+                               resolve_clear_exp_bias_on_zero_, true);
+            }
+          }
+
+          if (MatchesFilter("gamma_render_target_as_unorm16")) {
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            DrawLabelCell("gamma_render_target_as_unorm16");
+            ImGui::TableSetColumnIndex(1);
+            if (RightAlignedCheckbox("##gamma_render_target_as_unorm16",
+                                     &gamma_render_target_as_unorm16_)) {
+              ApplyBoolSetting("GPU", "gamma_render_target_as_unorm16",
+                               gamma_render_target_as_unorm16_, true);
             }
           }
 

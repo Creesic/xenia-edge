@@ -17,6 +17,7 @@
 #include "xenia/base/logging.h"
 #include "xenia/base/math.h"
 #include "xenia/gpu/draw_util.h"
+#include "xenia/gpu/gpu_flags.h"
 #include "xenia/gpu/register_file.h"
 #include "xenia/gpu/registers.h"
 #include "xenia/gpu/xenos.h"
@@ -563,7 +564,50 @@ void RenderTargetCache::ClearCache() {
   }
 }
 
-void RenderTargetCache::BeginFrame() { ResetAccumulatedRenderTargets(); }
+void RenderTargetCache::BeginFrame() {
+  ResetAccumulatedRenderTargets();
+  resolve_copy_dests_this_frame_.clear();
+}
+
+void RenderTargetCache::EndFrame() {
+  resolve_copy_dests_this_frame_.clear();
+}
+
+uint64_t RenderTargetCache::GetResolveCopyDestKey(
+    const draw_util::ResolveInfo& resolve_info) {
+  return (uint64_t(resolve_info.copy_dest_base) << 32) |
+         uint64_t(resolve_info.copy_dest_extent_length);
+}
+
+RenderTargetCache::ResolveCopyDestFrameState
+RenderTargetCache::GetResolveCopyDestFrameState(
+    const draw_util::ResolveInfo& resolve_info) {
+  if (!resolve_info.copy_dest_extent_length) {
+    return ResolveCopyDestFrameState::kNone;
+  }
+  const uint64_t key = GetResolveCopyDestKey(resolve_info);
+  if (resolve_copy_dests_this_frame_.contains(key)) {
+    return ResolveCopyDestFrameState::kRepeatExport;
+  }
+  resolve_copy_dests_this_frame_.insert(key);
+  return ResolveCopyDestFrameState::kFirstExport;
+}
+
+bool RenderTargetCache::CheckResolveCopyDestRepeat(
+    const draw_util::ResolveInfo& resolve_info) {
+  if (!cvars::skip_repeat_resolve_to_same_dest) {
+    return false;
+  }
+  if (GetResolveCopyDestFrameState(resolve_info) ==
+      ResolveCopyDestFrameState::kRepeatExport) {
+    XELOGI(
+        "Resolve: skipping repeat copy to guest 0x{:08X}+0x{:X} (already "
+        "exported this frame)",
+        resolve_info.copy_dest_base, resolve_info.copy_dest_extent_length);
+    return true;
+  }
+  return false;
+}
 
 bool RenderTargetCache::Update(bool is_rasterization_done,
                                reg::RB_DEPTHCONTROL normalized_depth_control,

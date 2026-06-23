@@ -970,6 +970,34 @@ void GetResolveEdramTileSpan(ResolveEdramInfo edram_info,
   rows_out = y1 - y0;
 }
 
+bool IsFloatColorRenderTargetFormat(xenos::ColorRenderTargetFormat format) {
+  switch (format) {
+    case xenos::ColorRenderTargetFormat::k_16_16_FLOAT:
+    case xenos::ColorRenderTargetFormat::k_16_16_16_16_FLOAT:
+    case xenos::ColorRenderTargetFormat::k_2_10_10_10_FLOAT:
+    case xenos::ColorRenderTargetFormat::
+        k_2_10_10_10_FLOAT_AS_16_16_16_16:
+    case xenos::ColorRenderTargetFormat::k_32_FLOAT:
+    case xenos::ColorRenderTargetFormat::k_32_32_FLOAT:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool IsFloatTextureFormat(xenos::TextureFormat format) {
+  switch (format) {
+    case xenos::TextureFormat::k_16_16_FLOAT:
+    case xenos::TextureFormat::k_16_16_16_16_FLOAT:
+    case xenos::TextureFormat::k_32_FLOAT:
+    case xenos::TextureFormat::k_32_32_FLOAT:
+    case xenos::TextureFormat::k_32_32_32_32_FLOAT:
+      return true;
+    default:
+      return false;
+  }
+}
+
 constexpr ResolveCopyShaderInfo
     resolve_copy_shader_info[size_t(ResolveCopyShaderIndex::kCount)] = {
         {"Resolve Copy Fast 32bpp 1x/2xMSAA", 6, 3},
@@ -1339,6 +1367,22 @@ bool GetResolveInfo(const RegisterFile& regs, const Memory& memory,
       // requested exponent bias is 27 or above, but it's a hack anyway, no need
       // to create a new copy info structure with one more bit just for this).
       exp_bias = std::min(exp_bias + int32_t(5), int32_t(31));
+    }
+    // copy_dest_exp_bias is paired with color_exp_bias on the source RT write.
+    // On the accuracy/FSI path, float16 EDRAM often already holds display-range
+    // values while RB still specifies a resolve-only bias (+11/+16) or stale
+    // paired registers (color_exp_bias != 0 with no matching write bias).
+    // Applying copy_dest_exp_bias before UNorm packing saturates exports to
+    // white - including k_16_16_FLOAT -> k_16_16_16_16 (Spider-Man scene
+    // export to 0x05517000). Paired float -> float exports are unaffected.
+    if (cvars::resolve_clear_exp_bias_on_zero) {
+      if (color_info.color_exp_bias == 0) {
+        exp_bias = 0;
+      }
+      if (IsFloatColorRenderTargetFormat(color_info.color_format) &&
+          !IsFloatTextureFormat(dest_format)) {
+        exp_bias = 0;
+      }
     }
     info_out.color_original_base = color_info.color_base;
   } else {

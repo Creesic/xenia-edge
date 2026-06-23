@@ -191,6 +191,56 @@ DEFINE_bool(
     "reading back specific pixel values (e.g., for gamma detection).",
     "GPU");
 
+DEFINE_bool(
+    reload_textures_after_resolve, true,
+    "Upload GPU textures overlapping a resolve destination immediately after "
+    "each resolve, before subsequent draws in the same frame. Disable to test "
+    "stale-texture composite behavior.",
+    "GPU");
+
+DEFINE_bool(
+    reload_textures_on_mark_resolved, false,
+    "Also reload overlapping GPU textures when MarkRangeAsResolved runs "
+    "(inside the resolve shader path, before IssueCopy returns).",
+    "GPU");
+
+DEFINE_bool(
+    sync_after_resolve_texture_reload, false,
+    "Insert GPU pipeline barriers immediately after post-resolve texture "
+    "reloads so later draws cannot sample in-flight uploads.",
+    "GPU");
+
+DEFINE_bool(
+    await_gpu_after_resolve, false,
+    "Wait for the GPU to finish all resolve and texture-upload work before "
+    "continuing PM4 processing.",
+    "GPU");
+
+DEFINE_bool(
+    invalidate_texture_bindings_after_resolve, true,
+    "Clear all texture binding slots after each resolve so the next draw "
+    "must rebind and reload.",
+    "GPU");
+
+DEFINE_bool(
+    end_submission_after_resolve, false,
+    "Close the current GPU submission immediately after each resolve.",
+    "GPU");
+
+DEFINE_bool(
+    skip_repeat_resolve_to_same_dest, true,
+    "Skip resolve copy when the same guest destination range was already "
+    "exported earlier this frame. Spider-Man and similar titles issue a "
+    "second export that poisons scene textures; disabling is for A/B testing.",
+    "GPU");
+
+DEFINE_bool(
+    resolve_clear_exp_bias_on_zero, true,
+    "Skip stale RB copy_dest_exp_bias during resolve when color_exp_bias is 0 "
+    "or when exporting float EDRAM to UNorm textures. Disable to test legacy "
+    "resolve export blowout.",
+    "GPU");
+
 DEFINE_bool(gpu_3d_to_2d_texture, true,
             "Handle shaders that sample 3D textures as 2D by creating a 2D "
             "texture from slice 0 of the guest memory.",
